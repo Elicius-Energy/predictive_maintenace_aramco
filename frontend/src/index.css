@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #0891b2;
+  --color-primary-light: #ecfeff;
+  --color-primary-dark: #164e63;
+  --color-accent-amber: #d97706;
+  --color-accent-amber-light: #fffbeb;
+  --color-accent-red: #dc2626;
+  --color-accent-red-light: #fef2f2;
+  --color-accent-green: #059669;
+  --color-accent-green-light: #ecfdf5;
+  --color-surface: #ffffff;
+  --color-surface-alt: #f8fafc;
+  --color-surface-muted: #f1f5f9;
+  --color-border: #e2e8f0;
+  --color-border-light: #f1f5f9;
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #475569;
+  --color-text-muted: #94a3b8;
+}
+
+@layer base {
+  :root {
+    background-color: #f8fafc;
+    color: #0f172a;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer base {
+  body {
+    @apply bg-surface-alt text-text-primary overflow-x-hidden;
+  }
+}
+
+@layer components {
+  .industrial-card {
+    @apply bg-surface border border-border rounded-xl shadow-sm;
+  }
+  
+  .status-healthy {
+    @apply text-accent-green;
+  }
+
+  .status-warning {
+    @apply text-accent-amber;
+  }
+
+  .status-critical {
+    @apply text-accent-red animate-pulse;
+  }
+
+  .scada-number {
+    @apply font-mono tracking-tight;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-surface-alt;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-border rounded-full hover:bg-text-muted transition-colors;
+}

@@ -1,0 +1,28 @@
+# FastAPI & Server
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+websockets==14.1
+python-multipart==0.0.18
+
+# MQTT
+paho-mqtt==2.1.0
+
+# Data Models & Config
+pydantic==2.10.3
+pydantic-settings==2.7.0
+
+# Scientific Computing
+numpy==2.2.1
+scipy==1.15.0
+
+# ML
+scikit-learn==1.6.1
+
+# RAG / AI
+anthropic==0.42.0
+faiss-cpu==1.9.0.post1
+sentence-transformers==3.3.1
+pypdf==5.1.0
+
+# Utilities
+python-dotenv==1.0.1
