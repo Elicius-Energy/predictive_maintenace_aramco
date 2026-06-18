@@ -64,6 +64,7 @@ export interface ElectricalFeatures {
   energy_cumulative: number;
   // ── 3-Phase Fields ─────────────────────────────────────────────────
   is_three_phase?: boolean;
+  dTS?: number;
   // Phase-to-neutral voltages
   v1n?: number;
   v2n?: number;

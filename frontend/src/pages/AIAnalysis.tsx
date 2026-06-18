@@ -51,7 +51,6 @@ const AIAnalysis: FC = () => {
   const [mode, setMode] = useState<Mode>('current');
   const [chatInput, setChatInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const pdfRef = useRef<HTMLDivElement>(null);
 
   // Machine-specific ROI data profiles (Relative Percentages)

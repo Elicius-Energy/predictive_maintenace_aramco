@@ -42,7 +42,6 @@ export const generatePdfFromElement = async (
     const pdfHeight = pdf.internal.pageSize.getHeight();
     const imgWidth = canvas.width;
     const imgHeight = canvas.height;
-    const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
     
     // Because the template is long, we'll want to split it by A4 page heights
     const pageHeightInPixels = pdfHeight / (pdfWidth / imgWidth);

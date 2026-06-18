@@ -20,31 +20,6 @@ const PhaseBadge: FC<{ phase: string; color: string }> = ({ phase, color }) => (
   </span>
 );
 
-/* ──────────────── stat card ──────────────── */
-const StatCard: FC<{
-  label: string;
-  value: string;
-  unit?: string;
-  color: string;
-  icon?: React.ReactNode;
-}> = ({ label, value, unit, color, icon }) => (
-  <div className="flex items-center gap-3 p-3 rounded-xl border border-border bg-surface hover:shadow-md transition-shadow">
-    <div
-      className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
-      style={{ backgroundColor: color + '18' }}
-    >
-      {icon || <Bolt size={18} style={{ color }} />}
-    </div>
-    <div className="min-w-0">
-      <p className="text-[10px] font-bold uppercase tracking-wider text-text-muted truncate">{label}</p>
-      <p className="text-lg font-mono font-extrabold text-text-primary leading-tight">
-        {value}
-        {unit && <span className="text-xs text-text-muted ml-1">{unit}</span>}
-      </p>
-    </div>
-  </div>
-);
-
 /* ──────────────── MAIN PAGE ──────────────── */
 const ElectricalParams: FC = () => {
   const { latestFeatures, isConnected } = useSensorData();

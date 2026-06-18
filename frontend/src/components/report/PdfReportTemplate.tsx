@@ -1,4 +1,4 @@
-import React, { forwardRef } from 'react';
+import { forwardRef } from 'react';
 import { AreaChart, Area, BarChart, Bar, CartesianGrid, XAxis, YAxis, ResponsiveContainer } from 'recharts';
 import TimeSeriesChart from '../charts/TimeSeriesChart';
 import FFTChart from '../charts/FFTChart';
