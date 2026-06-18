@@ -16,7 +16,7 @@ class Retriever:
         if not embedding_manager.index:
             embedding_manager.initialize()
             
-        if not embedding_manager.index:
+        if not embedding_manager.index or not embedding_manager.model:
             return ["No knowledge base available."]
 
         query_vector = embedding_manager.model.encode([query]).astype('float32')

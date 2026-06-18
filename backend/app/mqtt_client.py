@@ -11,7 +11,7 @@ from datetime import datetime
 import paho.mqtt.client as mqtt
 
 from app.config import settings
-from app.models import EnergyData, AccelData, SensorReading, DataSource
+from app.models import EnergyData, AccelData, SensorReading, DataSource, ThreePhaseEnergyData
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +19,16 @@ logger = logging.getLogger(__name__)
 class MQTTClient:
     """MQTT client with auto-reconnect and data parsing."""
     
+    # Map device IDs to friendly names
+    DEVICE_NAME_MAP: dict[str, str] = {
+        "002200203335471332323632": "LEDL_Demo",
+    }
+
     def __init__(self):
         self.client: Optional[mqtt.Client] = None
         self.connected = False
         self.last_energy_data: dict[str, EnergyData] = {}
+        self.last_three_phase_data: dict[str, ThreePhaseEnergyData] = {}
         self.last_accel_data: dict[str, AccelData] = {}
         self.last_message_time: float = 0
         self._reconnect_delay = settings.MQTT_RECONNECT_DELAY
@@ -43,7 +49,8 @@ class MQTTClient:
             # Subscribe to both topics
             client.subscribe(settings.MQTT_TOPIC_ENERGY)
             client.subscribe(settings.MQTT_TOPIC_ACCEL)
-            logger.info(f"Subscribed to: {settings.MQTT_TOPIC_ENERGY}, {settings.MQTT_TOPIC_ACCEL}")
+            client.subscribe(settings.MQTT_TOPIC_LEDL)
+            logger.info(f"Subscribed to: {settings.MQTT_TOPIC_ENERGY}, {settings.MQTT_TOPIC_ACCEL}, {settings.MQTT_TOPIC_LEDL}")
         else:
             logger.error(f"MQTT connection failed with code {rc}")
             self.connected = False
@@ -59,7 +66,13 @@ class MQTTClient:
         try:
             payload = json.loads(msg.payload.decode("utf-8"))
             self.last_message_time = time.time()
-            
+
+            # ── Handle 3-phase LEDL topic ──────────────────────────────────
+            if msg.topic == settings.MQTT_TOPIC_LEDL:
+                self._handle_ledl_message(payload)
+                return
+
+            # ── Handle legacy energy / accel topics ────────────────────────
             machine_id = payload.get("dID")
             if not machine_id:
                 parts = msg.topic.split("/")
@@ -75,15 +88,15 @@ class MQTTClient:
                 self.last_accel_data[machine_id] = AccelData(**payload)
                 logger.debug(f"[{machine_id}] Accel data: ax={self.last_accel_data[machine_id].ax}, ay={self.last_accel_data[machine_id].ay}")
             
-            # Build combined reading when we have both
-            if machine_id in self.last_energy_data and machine_id in self.last_accel_data:
+            # Build combined reading when we have at least one type of data
+            if machine_id in self.last_energy_data or machine_id in self.last_accel_data:
                 reading = SensorReading(
                     timestamp=datetime.utcnow(),
                     machine_id=machine_id,
                     source=DataSource.MQTT,
-                    energy=self.last_energy_data[machine_id],
-                    accel=self.last_accel_data[machine_id],
-                    temperature=self.last_accel_data[machine_id].temp,
+                    energy=self.last_energy_data.get(machine_id),
+                    accel=self.last_accel_data.get(machine_id),
+                    temperature=self.last_accel_data[machine_id].temp if machine_id in self.last_accel_data else None,
                 )
                 if self._on_data_callback and self._loop:
                     asyncio.run_coroutine_threadsafe(
@@ -95,6 +108,53 @@ class MQTTClient:
             logger.error(f"Invalid JSON on topic {msg.topic}: {msg.payload}")
         except Exception as e:
             logger.error(f"Error processing MQTT message: {e}")
+
+    def _handle_ledl_message(self, payload: dict):
+        """Parse a 3-phase energy meter message from the 'ledl' topic."""
+        try:
+            three_phase = ThreePhaseEnergyData(**payload)
+            raw_id = three_phase.dID
+            machine_id = self.DEVICE_NAME_MAP.get(raw_id, raw_id)
+
+            self.last_three_phase_data[machine_id] = three_phase
+            logger.debug(
+                f"[{machine_id}] 3-Phase: V1N={three_phase.v1n}, V2N={three_phase.v2n}, "
+                f"V3N={three_phase.v3n}, I1={three_phase.i1}, freq={three_phase.freq}"
+            )
+
+            # Build backward-compatible EnergyData using averages/totals
+            compat_energy = EnergyData(
+                V=three_phase.vln_avg,
+                I=three_phase.i_avg,
+                P=three_phase.t_kw,
+                KVA=three_phase.t_kva,
+                pf=three_phase.pf_avg,
+                Energy=three_phase.kwh_imp,
+                Freq=three_phase.freq,
+            )
+            self.last_energy_data[machine_id] = compat_energy
+
+            # Convert device epoch timestamp → datetime
+            ts = datetime.utcfromtimestamp(three_phase.dTS) if three_phase.dTS > 0 else datetime.utcnow()
+
+            reading = SensorReading(
+                timestamp=ts,
+                machine_id=machine_id,
+                source=DataSource.MQTT,
+                energy=compat_energy,
+                accel=self.last_accel_data.get(machine_id),
+                temperature=None,
+            )
+            # Attach the full 3-phase payload as an extra attribute for feature_engineering
+            reading._three_phase = three_phase  # type: ignore[attr-defined]
+
+            if self._on_data_callback and self._loop:
+                asyncio.run_coroutine_threadsafe(
+                    self._on_data_callback(reading),
+                    self._loop
+                )
+        except Exception as e:
+            logger.error(f"Error processing LEDL 3-phase message: {e}")
     
     async def start(self, loop: asyncio.AbstractEventLoop):
         """Start MQTT client in background."""

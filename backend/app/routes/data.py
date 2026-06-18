@@ -84,52 +84,38 @@ async def download_csv(
 
 @router.get("/machines", response_model=List[MachineInfo])
 async def get_machines():
-    """Get list of monitored machines.
-    Returns the same IDs used by the simulation engine so data is consistent.
-    """
-    return [
-        MachineInfo(
-            machine_id="sim-pump-001",
-            name="Centrifugal Pump P-101",
-            type="Centrifugal Pump",
-            location="Ras Tanura Refinery",
-            unit="Processing Unit 3",
-            plant="Ras Tanura",
-            status=MachineStatus.HEALTHY,
-            health_score=94.2,
-            uptime_hours=2847.3,
-        ),
-        MachineInfo(
-            machine_id="sim-pump-002",
-            name="Booster Pump P-202",
-            type="Reciprocating Pump",
-            location="Jubail Industrial Complex",
-            unit="Processing Unit 5",
-            plant="Jubail",
-            status=MachineStatus.WARNING,
-            health_score=72.8,
-            uptime_hours=8760.0,
-        ),
-        MachineInfo(
-            machine_id="sim-motor-003",
-            name="Compressor Motor M-301",
-            type="Induction Motor",
-            location="Yanbu Integrated",
-            unit="Gas Processing Unit 1",
-            plant="Yanbu",
-            status=MachineStatus.HEALTHY,
-            health_score=88.5,
-            uptime_hours=6500.0,
-        ),
-        MachineInfo(
-            machine_id="Machine_10",
-            name="Actual MQTT Device",
-            type="Unknown Asset Type",
-            location="Field Operations",
-            unit="Remote Unit 10",
-            plant="Remote Substation",
-            status=MachineStatus.HEALTHY,
-            health_score=100.0,
-            uptime_hours=100.0,
-        ),
-    ]
+    """Get list of monitored machines based on recent activity, sorted by most recent data first."""
+    active_ids = db.get_active_machines(minutes=10)
+    
+    # Map device IDs to friendly names
+    DEVICE_NAME_MAP = {
+        "002200203335471332323632": "LEDL_Demo",
+    }
+    
+    # Sort by most recent feature data so the actively-producing machine is first
+    machines_with_activity = []
+    for mid in active_ids:
+        latest = db.get_latest_reading(machine_id=mid)
+        last_ts = latest.get("timestamp", "") if latest else ""
+        machines_with_activity.append((mid, last_ts))
+    
+    # Sort descending by timestamp (most recent first)
+    machines_with_activity.sort(key=lambda x: x[1], reverse=True)
+    
+    machines = []
+    for mid, _ in machines_with_activity:
+        mapped_name = DEVICE_NAME_MAP.get(mid, f"Device {mid}")
+        machines.append(
+            MachineInfo(
+                machine_id=mid,
+                name=mapped_name,
+                type="MQTT Device",
+                location="Field Operations",
+                unit="Remote Unit",
+                plant="Site",
+                status=MachineStatus.HEALTHY,
+                health_score=100.0,
+                uptime_hours=0.0,
+            )
+        )
+    return machines

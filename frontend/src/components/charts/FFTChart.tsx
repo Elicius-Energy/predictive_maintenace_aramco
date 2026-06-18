@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react';
 import type { FC } from 'react';
 import {
   BarChart,
@@ -16,10 +17,10 @@ interface FFTChartProps {
 }
 
 const FFTChart: FC<FFTChartProps> = ({ magnitudes, frequencies }) => {
-  const data = magnitudes.slice(0, 100).map((mag, i) => ({
+  const data = useMemo(() => magnitudes.slice(0, 100).map((mag, i) => ({
     freq: frequencies[i]?.toFixed(1) || i,
     mag: mag,
-  }));
+  })), [magnitudes, frequencies]);
 
   return (
     <div className="w-full h-full flex flex-col">
@@ -46,4 +47,4 @@ const FFTChart: FC<FFTChartProps> = ({ magnitudes, frequencies }) => {
   );
 };
 
-export default FFTChart;
+export default memo(FFTChart);

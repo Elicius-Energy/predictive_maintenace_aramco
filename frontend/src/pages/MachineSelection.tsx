@@ -1,7 +1,7 @@
 import type { FC } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMachine } from '../contexts/MachineContext';
-import { Factory, Cog, CheckCircle2, AlertTriangle, ShieldX, ChevronRight, MapPin, WifiOff } from 'lucide-react';
+import { Factory, Cog, CheckCircle2, AlertTriangle, ShieldX, ChevronRight, MapPin } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -10,7 +10,7 @@ function cn(...inputs: ClassValue[]) {
 }
 
 const MachineSelection: FC = () => {
-  const { machines, activeMachine, setActiveMachine, isSimulated } = useMachine();
+  const { machines, activeMachine, setActiveMachine } = useMachine();
   const navigate = useNavigate();
 
   const handleSelectMachine = (machine: any) => {
@@ -30,13 +30,7 @@ const MachineSelection: FC = () => {
           <p className="text-text-secondary text-base max-w-2xl">
             Industrial assets across Saudi Aramco refining facilities. Select a machine to view real-time diagnostics.
           </p>
-          {isSimulated && (
-            <span className="flex items-center gap-1.5 px-3 py-1 bg-accent-amber-light text-accent-amber rounded-full text-xs font-semibold border border-amber-200">
-              <WifiOff size={12} />
-              Simulated Mode
-            </span>
-          )}
-        </div>
+         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -51,12 +45,6 @@ const MachineSelection: FC = () => {
                 : "hover:border-primary/40 hover:shadow-md"
             )}
           >
-            {/* Simulated badge */}
-            {machine.machine_id.startsWith('sim-') && (
-              <div className="absolute top-3 right-3 px-2 py-0.5 bg-blue-50 text-blue-500 rounded text-[10px] font-bold border border-blue-100">
-                SIMULATED
-              </div>
-            )}
 
             {/* Background Icon Watermark */}
             <Cog size={120} className="absolute -right-8 -bottom-8 text-gray-100 -rotate-12 group-hover:rotate-0 transition-transform duration-700" />

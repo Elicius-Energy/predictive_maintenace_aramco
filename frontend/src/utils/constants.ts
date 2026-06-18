@@ -2,8 +2,24 @@
  * System constants and config.
  */
 
-export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
-export const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws/stream';
+const normalizeBaseUrl = (value?: string) => {
+  const trimmed = value?.trim();
+  if (!trimmed) return '';
+  return trimmed.endsWith('/') ? trimmed.slice(0, -1) : trimmed;
+};
+
+const defaultBackendUrl = import.meta.env.DEV
+  ? (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:8000` : 'http://localhost:8000')
+  : '';
+const browserWsUrl = typeof window !== 'undefined'
+  ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/stream`
+  : 'ws://localhost:8000/ws/stream';
+const defaultWsUrl = import.meta.env.DEV
+  ? (typeof window !== 'undefined' ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:8000/ws/stream` : 'ws://localhost:8000/ws/stream')
+  : browserWsUrl;
+
+export const BACKEND_URL = normalizeBaseUrl(import.meta.env.VITE_BACKEND_URL) || defaultBackendUrl;
+export const WS_URL = normalizeBaseUrl(import.meta.env.VITE_WS_URL) || defaultWsUrl;
 
 export const COLORS = {
   HEALTHY: '#10b981',

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import type { ReactNode, FC } from 'react';
 import type { MachineInfo } from '../types';
 import axios from 'axios';
@@ -10,7 +10,6 @@ interface MachineContextType {
   machines: MachineInfo[];
   loading: boolean;
   refreshMachines: () => Promise<void>;
-  isSimulated: boolean;
   selectedWindow: number;
   setSelectedWindow: (minutes: number) => void;
 }
@@ -25,99 +24,48 @@ export const TIME_WINDOWS = [
 
 const MachineContext = createContext<MachineContextType | undefined>(undefined);
 
-/** Default simulated machines when backend is unavailable */
-const SIMULATED_MACHINES: MachineInfo[] = [
-  {
-    machine_id: 'sim-pump-001',
-    name: 'Centrifugal Pump P-101',
-    type: 'Centrifugal Pump',
-    location: 'Ras Tanura Refinery',
-    unit: 'Processing Unit 3',
-    plant: 'Ras Tanura',
-    status: 'healthy',
-    health_score: 94.2,
-    uptime_hours: 4320,
-    last_maintenance: '2026-03-01T08:00:00Z',
-  },
-  {
-    machine_id: 'sim-pump-002',
-    name: 'Booster Pump P-202',
-    type: 'Reciprocating Pump',
-    location: 'Jubail Industrial Complex',
-    unit: 'Processing Unit 5',
-    plant: 'Jubail',
-    status: 'warning',
-    health_score: 72.8,
-    uptime_hours: 8760,
-    last_maintenance: '2026-01-15T08:00:00Z',
-  },
-  {
-    machine_id: 'sim-motor-003',
-    name: 'Compressor Motor M-301',
-    type: 'Induction Motor',
-    location: 'Yanbu Integrated',
-    unit: 'Gas Processing Unit 1',
-    plant: 'Yanbu',
-    status: 'healthy',
-    health_score: 88.5,
-    uptime_hours: 6500,
-    last_maintenance: '2026-02-10T08:00:00Z',
-  },
-  {
-    machine_id: 'Machine_10',
-    name: 'Actual MQTT Device',
-    type: 'Unknown Asset Type',
-    location: 'Field Operations',
-    unit: 'Remote Unit 10',
-    plant: 'Remote Substation',
-    status: 'healthy',
-    health_score: 100.0,
-    uptime_hours: 100,
-    last_maintenance: '2026-04-06T08:00:00Z',
-  },
-];
-
 export const MachineProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [activeMachine, setActiveMachine] = useState<MachineInfo | null>(null);
   const [machines, setMachines] = useState<MachineInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isSimulated, setIsSimulated] = useState(false);
   const [selectedWindow, setSelectedWindow] = useState<number>(5);
+  const userSelectedRef = useRef(false);
 
-  const refreshMachines = async () => {
+  const handleSetActiveMachine = useCallback((machine: MachineInfo | null) => {
+    userSelectedRef.current = true;
+    setActiveMachine(machine);
+  }, []);
+
+  const refreshMachines = useCallback(async () => {
     try {
       const response = await axios.get(`${BACKEND_URL}/api/data/machines`);
       const realMachines: MachineInfo[] = response.data;
       setMachines(realMachines);
-      setIsSimulated(false);
-      if (!activeMachine && realMachines.length > 0) {
+      // Auto-select the first machine (most recently active) if user hasn't manually selected one
+      if (realMachines.length > 0 && !userSelectedRef.current) {
         setActiveMachine(realMachines[0]);
       }
     } catch {
-      // Backend unavailable — use simulated machines
-      console.info('Backend unavailable. Using simulated machine data.');
-      setMachines(SIMULATED_MACHINES);
-      setIsSimulated(true);
-      if (!activeMachine && SIMULATED_MACHINES.length > 0) {
-        setActiveMachine(SIMULATED_MACHINES[0]);
-      }
+      console.error('Backend unavailable. No machines to display.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
+  // Initial fetch + periodic refresh every 15 seconds so newly active machines appear
   useEffect(() => {
     refreshMachines();
-  }, []);
+    const interval = window.setInterval(refreshMachines, 15000);
+    return () => clearInterval(interval);
+  }, [refreshMachines]);
 
   return (
     <MachineContext.Provider value={{ 
       activeMachine, 
-      setActiveMachine, 
+      setActiveMachine: handleSetActiveMachine, 
       machines, 
       loading, 
-      refreshMachines, 
-      isSimulated,
+      refreshMachines,
       selectedWindow,
       setSelectedWindow
     }}>
@@ -133,3 +81,4 @@ export const useMachine = () => {
   }
   return context;
 };
+

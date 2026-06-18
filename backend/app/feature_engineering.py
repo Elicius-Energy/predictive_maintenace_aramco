@@ -47,18 +47,20 @@ class FeatureExtractor:
 
     def extract_features(self, reading: SensorReading) -> Optional[FeatureVector]:
         """Extract all features from the latest reading and machine's buffers."""
-        if not reading.accel or not reading.energy:
-            return None
-            
         mid = reading.machine_id
-        self.push_reading(reading)
         
-        # Only compute if we have enough data for a decent window
-        if len(self.accel_x_buffers[mid]) < 10:
-            return None
+        vibration = VibrationFeatures()
+        if reading.accel:
+            self.push_reading(reading)
+            if len(self.accel_x_buffers[mid]) >= 10:
+                vibration = self._compute_vibration_features(mid)
+                
+        electrical = ElectricalFeatures()
+        if reading.energy:
+            electrical = self._compute_electrical_features(reading)
             
-        vibration = self._compute_vibration_features(mid)
-        electrical = self._compute_electrical_features(reading)
+        if not reading.accel and not reading.energy:
+            return None
         
         return FeatureVector(
             timestamp=reading.timestamp,
@@ -143,7 +145,7 @@ class FeatureExtractor:
         # Load percentage (assume nominal 10kW motor)
         load_pct = (e.P / 10.0) * 100 
         
-        return ElectricalFeatures(
+        features = ElectricalFeatures(
             voltage=e.V,
             current=e.I,
             active_power=e.P,
@@ -154,6 +156,60 @@ class FeatureExtractor:
             load_percentage=float(load_pct),
             energy_cumulative=e.Energy
         )
+        
+        # Add 3-phase data if available
+        if hasattr(reading, "_three_phase"):
+            tp = reading._three_phase
+            features.is_three_phase = True
+            features.dTS = tp.dTS
+            
+            features.v1n = tp.v1n
+            features.v2n = tp.v2n
+            features.v3n = tp.v3n
+            features.vln_avg = tp.vln_avg
+            
+            features.v12 = tp.v12
+            features.v23 = tp.v23
+            features.v31 = tp.v31
+            features.vll_avg = tp.vll_avg
+            
+            features.i1 = tp.i1
+            features.i2 = tp.i2
+            features.i3 = tp.i3
+            features.i_avg = tp.i_avg
+            
+            features.kw1 = tp.kw1
+            features.kw2 = tp.kw2
+            features.kw3 = tp.kw3
+            
+            features.kvar1 = tp.kvar1
+            features.kvar2 = tp.kvar2
+            features.kvar3 = tp.kvar3
+            
+            features.kva1 = tp.kva1
+            features.kva2 = tp.kva2
+            features.kva3 = tp.kva3
+            
+            features.t_kw = tp.t_kw
+            features.t_kvar = tp.t_kvar
+            features.t_kva = tp.t_kva
+            
+            features.pf1 = tp.pf1
+            features.pf2 = tp.pf2
+            features.pf3 = tp.pf3
+            features.pf_avg = tp.pf_avg
+            
+            features.kwh_imp = tp.kwh_imp
+            features.kwh_exp = tp.kwh_exp
+            features.kvarh_imp = tp.kvarh_imp
+            features.kvarh_exp = tp.kvarh_exp
+            features.t_kvah = tp.t_kvah
+            
+            features.md_kw = tp.md_kw
+            features.md_kvar = tp.md_kvar
+            features.md_kva = tp.md_kva
+
+        return features
 
 # Singleton
 feature_extractor = FeatureExtractor()

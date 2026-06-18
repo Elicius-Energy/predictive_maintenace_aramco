@@ -1,9 +1,9 @@
 import type { FC } from 'react';
 import { NavLink } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  Activity, 
-  Zap, 
+import {
+  LayoutDashboard,
+  Activity,
+  Zap,
   Settings2,
   BrainCircuit,
   LogOut
@@ -31,13 +31,13 @@ const Sidebar: FC = () => {
     >
       {/* Branding — Elicius Logo (Centered & Large) */}
       <div className="py-7 px-6 border-b border-gray-100 flex flex-col items-center">
-        <img 
-          src="/Elicius_Logo.png" 
-          alt="Elicius" 
+        <img
+          src="/Elicius_Logo.png"
+          alt="Elicius"
           className="h-16 w-auto object-contain mb-2"
         />
         <p className="text-[11px] text-cyan-600 font-semibold tracking-[0.2em] uppercase">
-          Saudi Aramco PdM
+          PdM Dashboard
         </p>
       </div>
 
@@ -49,8 +49,8 @@ const Sidebar: FC = () => {
             to={item.path}
             className={({ isActive }) => cn(
               "flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all duration-200 group",
-              isActive 
-                ? "bg-cyan-50 text-cyan-700 font-semibold shadow-sm border border-cyan-100" 
+              isActive
+                ? "bg-cyan-50 text-cyan-700 font-semibold shadow-sm border border-cyan-100"
                 : "text-gray-500 hover:text-gray-800 hover:bg-gray-50"
             )}
           >
@@ -71,7 +71,7 @@ const Sidebar: FC = () => {
           <p className="text-xs text-gray-600 font-mono">SAMPLING: 1Hz</p>
         </div>
 
-        <button 
+        <button
           onClick={() => {
             sessionStorage.removeItem('isAuthenticated');
             window.location.href = '/login';

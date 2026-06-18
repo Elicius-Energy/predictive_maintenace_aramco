@@ -93,7 +93,7 @@ const Topbar: FC = () => {
             <XCircle size={16} className="text-accent-red animate-pulse" />
           )}
           <span className="text-xs font-semibold tracking-wide text-text-secondary">
-            {isConnected ? 'LIVE FEED ACTIVE' : 'SIMULATED MODE'}
+            {isConnected ? 'LIVE FEED ACTIVE' : 'DISCONNECTED'}
           </span>
         </div>
 

@@ -4,6 +4,8 @@ import { useHistory } from '../contexts/HistoryContext';
 import TimeSeriesChart from '../components/charts/TimeSeriesChart';
 import FFTChart from '../components/charts/FFTChart';
 import GaugeChart from '../components/charts/GaugeChart';
+import FormulaPanel from '../components/common/FormulaPanel';
+import { FORMULAS } from '../data/formulas';
 import { Activity, ShieldAlert, Cpu, Layers } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -14,9 +16,10 @@ function cn(...inputs: ClassValue[]) {
 
 const MechanicalParams: FC = () => {
   const { latestFeatures, latestHealth } = useSensorData();
-  const { mechanicalHistory } = useHistory();
+  const { mechanicalHistory, latestHistoricalFeatures } = useHistory();
 
-  const vibe = latestFeatures?.vibration;
+  const vibe = latestFeatures?.vibration || latestHistoricalFeatures?.vibration;
+  const isoZone = latestFeatures?.iso_zone || latestHistoricalFeatures?.iso_zone;
 
   return (
     <div className="space-y-6">
@@ -55,30 +58,37 @@ const MechanicalParams: FC = () => {
                  </p>
               </div>
            </div>
+           <FormulaPanel items={[...FORMULAS.vibrationVelocity, ...FORMULAS.vibrationShape]} className="w-full" />
         </div>
 
         {/* Real-time Acceleration Trace */}
-        <div className="lg:col-span-3 industrial-card p-6 h-[300px]">
-           <TimeSeriesChart 
-             data={mechanicalHistory} 
-             title="Acceleration Waveform (g)"
-             lines={[
-               { key: 'ax', color: '#0891b2', name: 'X-Axis' },
-               { key: 'ay', color: '#059669', name: 'Y-Axis' },
-               { key: 'az', color: '#7c3aed', name: 'Z-Axis' }
-             ]}
-             yDomain={[-5, 5]}
-           />
+        <div className="lg:col-span-3 industrial-card p-6">
+           <div className="h-[300px]">
+             <TimeSeriesChart 
+               data={mechanicalHistory} 
+               title="Acceleration Waveform (g)"
+               lines={[
+                 { key: 'ax', color: '#0891b2', name: 'X-Axis' },
+                 { key: 'ay', color: '#059669', name: 'Y-Axis' },
+                 { key: 'az', color: '#7c3aed', name: 'Z-Axis' }
+               ]}
+               yDomain={[-5, 5]}
+             />
+           </div>
+           <FormulaPanel items={FORMULAS.vibrationVelocity} />
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* FFT Spectrum */}
-        <div className="industrial-card p-6 h-[350px]">
-           <FFTChart 
-             magnitudes={vibe?.fft_magnitudes || []} 
-             frequencies={vibe?.fft_frequencies || []} 
-           />
+        <div className="industrial-card p-6">
+           <div className="h-[350px]">
+             <FFTChart 
+               magnitudes={vibe?.fft_magnitudes || []} 
+               frequencies={vibe?.fft_frequencies || []} 
+             />
+           </div>
+           <FormulaPanel items={FORMULAS.fft} />
         </div>
 
         {/* Health Indicators */}
@@ -120,7 +130,7 @@ const MechanicalParams: FC = () => {
                          key={z} 
                          className={cn(
                            "w-9 h-9 flex items-center justify-center rounded-lg font-bold text-sm",
-                           latestFeatures?.iso_zone === z 
+                           isoZone === z 
                             ? (z === 'A' ? "bg-accent-green text-white" : z === 'B' ? "bg-accent-green/60 text-white" : z === 'C' ? "bg-accent-amber text-white" : "bg-accent-red text-white")
                             : "bg-surface text-text-muted border border-border"
                          )}
@@ -131,6 +141,7 @@ const MechanicalParams: FC = () => {
                  </div>
               </div>
            </div>
+           <FormulaPanel items={[...FORMULAS.bearingHealth, ...FORMULAS.imbalance, ...FORMULAS.isoZone]} />
         </div>
       </div>
     </div>

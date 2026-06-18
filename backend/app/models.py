@@ -54,6 +54,60 @@ class EnergyData(BaseModel):
     Freq: float = Field(50.0, description="Frequency (Hz)")
 
 
+class ThreePhaseEnergyData(BaseModel):
+    """3-phase energy meter data from the 'ledl' MQTT topic."""
+    dID: str = Field("", description="Device ID")
+    dTS: int = Field(0, description="Device timestamp (epoch)")
+    # Phase-to-neutral voltages
+    v1n: float = Field(0.0, description="L1-N Voltage")
+    v2n: float = Field(0.0, description="L2-N Voltage")
+    v3n: float = Field(0.0, description="L3-N Voltage")
+    vln_avg: float = Field(0.0, description="Average L-N Voltage")
+    # Line-to-line voltages
+    v12: float = Field(0.0, description="L1-L2 Voltage")
+    v23: float = Field(0.0, description="L2-L3 Voltage")
+    v31: float = Field(0.0, description="L3-L1 Voltage")
+    vll_avg: float = Field(0.0, description="Average L-L Voltage")
+    # Currents
+    i1: float = Field(0.0, description="L1 Current")
+    i2: float = Field(0.0, description="L2 Current")
+    i3: float = Field(0.0, description="L3 Current")
+    i_avg: float = Field(0.0, description="Average Current")
+    # Active Power (kW)
+    kw1: float = Field(0.0, description="L1 Active Power")
+    kw2: float = Field(0.0, description="L2 Active Power")
+    kw3: float = Field(0.0, description="L3 Active Power")
+    # Reactive Power (kVAR)
+    kvar1: float = Field(0.0, description="L1 Reactive Power")
+    kvar2: float = Field(0.0, description="L2 Reactive Power")
+    kvar3: float = Field(0.0, description="L3 Reactive Power")
+    # Apparent Power (kVA)
+    kva1: float = Field(0.0, description="L1 Apparent Power")
+    kva2: float = Field(0.0, description="L2 Apparent Power")
+    kva3: float = Field(0.0, description="L3 Apparent Power")
+    # Totals
+    t_kw: float = Field(0.0, description="Total Active Power")
+    t_kvar: float = Field(0.0, description="Total Reactive Power")
+    t_kva: float = Field(0.0, description="Total Apparent Power")
+    # Power Factor
+    pf1: float = Field(1.0, description="L1 Power Factor")
+    pf2: float = Field(1.0, description="L2 Power Factor")
+    pf3: float = Field(1.0, description="L3 Power Factor")
+    pf_avg: float = Field(1.0, description="Average Power Factor")
+    # Frequency
+    freq: float = Field(50.0, description="Frequency (Hz)")
+    # Energy counters
+    kwh_imp: float = Field(0.0, description="kWh Import")
+    kwh_exp: float = Field(0.0, description="kWh Export")
+    kvarh_imp: float = Field(0.0, description="kVARh Import")
+    kvarh_exp: float = Field(0.0, description="kVARh Export")
+    t_kvah: float = Field(0.0, description="Total kVAh")
+    # Max Demand
+    md_kw: float = Field(0.0, description="Max Demand kW")
+    md_kvar: float = Field(0.0, description="Max Demand kVAR")
+    md_kva: float = Field(0.0, description="Max Demand kVA")
+
+
 class AccelData(BaseModel):
     """Acceleration and gyroscope data from energy/Machine_5/accel topic."""
     ax: float = Field(..., description="X-axis acceleration (g)")
@@ -96,7 +150,7 @@ class VibrationFeatures(BaseModel):
 
 
 class ElectricalFeatures(BaseModel):
-    """Computed electrical features."""
+    """Computed electrical features (supports both single-phase and 3-phase)."""
     voltage: float = 0.0
     current: float = 0.0
     active_power: float = 0.0
@@ -106,6 +160,55 @@ class ElectricalFeatures(BaseModel):
     efficiency: float = 0.0
     load_percentage: float = 0.0
     energy_cumulative: float = 0.0
+    # ── 3-Phase Fields ─────────────────────────────────────────────────
+    is_three_phase: bool = False
+    dTS: int = 0
+    # Phase-to-neutral voltages
+    v1n: float = 0.0
+    v2n: float = 0.0
+    v3n: float = 0.0
+    vln_avg: float = 0.0
+    # Line-to-line voltages
+    v12: float = 0.0
+    v23: float = 0.0
+    v31: float = 0.0
+    vll_avg: float = 0.0
+    # Per-phase currents
+    i1: float = 0.0
+    i2: float = 0.0
+    i3: float = 0.0
+    i_avg: float = 0.0
+    # Per-phase Active Power (kW)
+    kw1: float = 0.0
+    kw2: float = 0.0
+    kw3: float = 0.0
+    # Per-phase Reactive Power (kVAR)
+    kvar1: float = 0.0
+    kvar2: float = 0.0
+    kvar3: float = 0.0
+    # Per-phase Apparent Power (kVA)
+    kva1: float = 0.0
+    kva2: float = 0.0
+    kva3: float = 0.0
+    # Totals
+    t_kw: float = 0.0
+    t_kvar: float = 0.0
+    t_kva: float = 0.0
+    # Per-phase Power Factor
+    pf1: float = 1.0
+    pf2: float = 1.0
+    pf3: float = 1.0
+    pf_avg: float = 1.0
+    # Energy counters
+    kwh_imp: float = 0.0
+    kwh_exp: float = 0.0
+    kvarh_imp: float = 0.0
+    kvarh_exp: float = 0.0
+    t_kvah: float = 0.0
+    # Max Demand
+    md_kw: float = 0.0
+    md_kvar: float = 0.0
+    md_kva: float = 0.0
 
 
 class FeatureVector(BaseModel):

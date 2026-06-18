@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react';
 import type { FC } from 'react';
 import {
   LineChart,
@@ -23,11 +24,24 @@ interface TimeSeriesChartProps {
 }
 
 const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ data, lines, yDomain, title }) => {
-  // Convert timestamps to numbers for a proper time scale
-  const processedData = data.map(d => ({
-    ...d,
-    timeValue: new Date(d.timestamp.endsWith('Z') ? d.timestamp : d.timestamp + 'Z').getTime()
-  })).sort((a, b) => a.timeValue - b.timeValue);
+  // Memoize the expensive map + sort so it only re-computes when data changes
+  const processedData = useMemo(() => {
+    return data.map(d => {
+      let timeValue;
+      if (d.dTS && d.dTS > 0) {
+        // Device sends "epoch time IST", meaning the epoch is offset by +5.5 hours.
+        // We subtract the IST offset (19800 seconds) so it becomes a standard UTC epoch.
+        // Then formatting it to 'Asia/Kolkata' will correctly display the time.
+        timeValue = (d.dTS - 19800) * 1000;
+      } else {
+        timeValue = new Date(d.timestamp.endsWith('Z') ? d.timestamp : d.timestamp + 'Z').getTime();
+      }
+      return {
+        ...d,
+        timeValue
+      };
+    }).sort((a, b) => a.timeValue - b.timeValue);
+  }, [data]);
 
   return (
     <div className="w-full h-full flex flex-col">
@@ -52,7 +66,9 @@ const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ data, lines, yDomain, title
               minTickGap={50}
               tickFormatter={(unix) => {
                 try {
-                  return new Date(unix).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  // We formatted all timestamps to standard UTC epoch, 
+                  // so we can reliably use Asia/Kolkata here.
+                  return new Date(unix).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
                 } catch {
                   return '';
                 }
@@ -69,7 +85,7 @@ const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ data, lines, yDomain, title
             <Tooltip 
               contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
               itemStyle={{ padding: '2px 0' }}
-              labelFormatter={(unix) => new Date(unix).toLocaleString()}
+              labelFormatter={(unix) => new Date(unix).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false })}
             />
             <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
             {lines.map((line) => (
@@ -92,4 +108,4 @@ const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ data, lines, yDomain, title
   );
 };
 
-export default TimeSeriesChart;
+export default memo(TimeSeriesChart);

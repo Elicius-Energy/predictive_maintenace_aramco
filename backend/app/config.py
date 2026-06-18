@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     MQTT_BROKER_PORT: int = 1883
     MQTT_TOPIC_ENERGY: str = "energy/+"
     MQTT_TOPIC_ACCEL: str = "energy/+/accel"
+    MQTT_TOPIC_LEDL: str = "ledl"
     MQTT_CLIENT_ID: str = "predictive_maintenance_backend"
     MQTT_RECONNECT_DELAY: int = 5
     MQTT_MAX_RECONNECT_DELAY: int = 60
@@ -28,7 +29,7 @@ class Settings(BaseSettings):
     SIMULATION_INTERVAL_MS: int = 1000
     
     # Anthropic API
-    ANTHROPIC_API_KEY: Optional[str] = "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"
+    ANTHROPIC_API_KEY: Optional[str] = None
     ANTHROPIC_MODEL: str = "claude-3-5-sonnet-latest"
     RAG_CACHE_TTL_SECONDS: int = 30
     RAG_AUTO_INTERVAL_SECONDS: int = 60
@@ -50,7 +51,8 @@ class Settings(BaseSettings):
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"]
+    CORS_ORIGINS: list[str] = ["*"]
+    CORS_ORIGIN_REGEX: str = r".*"
     
     class Config:
         env_file = str(Path(__file__).parent.parent.parent / ".env")
@@ -59,3 +61,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+def get_runtime_settings() -> Settings:
+    """Reload settings from `.env` for request-time consumers such as AI clients."""
+    return Settings()

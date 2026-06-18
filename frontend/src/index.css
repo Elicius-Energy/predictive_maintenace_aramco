@@ -10,6 +10,9 @@
   --color-accent-red-light: #fef2f2;
   --color-accent-green: #059669;
   --color-accent-green-light: #ecfdf5;
+  --color-phase-l1: #ef4444; /* Red */
+  --color-phase-l2: #f59e0b; /* Yellow/Amber */
+  --color-phase-l3: #3b82f6; /* Blue */
   --color-surface: #ffffff;
   --color-surface-alt: #f8fafc;
   --color-surface-muted: #f1f5f9;

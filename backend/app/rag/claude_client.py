@@ -7,7 +7,7 @@ import asyncio
 from typing import Optional
 from anthropic import AsyncAnthropic
 
-from app.config import settings
+from app.config import settings, get_runtime_settings
 from app.models import FeatureVector, FaultDiagnosis, Alert, Severity
 from app.rag.retriever import retriever
 from app.rag.prompt_builder import prompt_builder
@@ -19,13 +19,29 @@ class ClaudeClient:
     """Client for Anthropic API integration."""
     
     def __init__(self):
-        self.api_key = settings.ANTHROPIC_API_KEY
+        self.api_key = None
+        self.model = settings.ANTHROPIC_MODEL
         self.client = None
-        if self.api_key:
-            self.client = AsyncAnthropic(api_key=self.api_key)
+        self._refresh_client()
+
+    def _refresh_client(self):
+        """Always prefer the latest `.env` values over import-time state."""
+        runtime_settings = get_runtime_settings()
+        self.api_key = runtime_settings.ANTHROPIC_API_KEY
+        self.model = runtime_settings.ANTHROPIC_MODEL
+        self.client = AsyncAnthropic(api_key=self.api_key) if self.api_key else None
+
+    def _fallback_chat_response(self, reason: str) -> str:
+        return (
+            "AI analysis is temporarily unavailable from Anthropic, so I am falling back to a local summary. "
+            f"Reason: {reason}. "
+            f"Current model from `.env`: {self.model or 'not set'}. "
+            "Please verify that the backend is running and that `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL` are valid in `.env`."
+        )
             
     async def get_diagnosis(self, fv: FeatureVector, recent_alerts: list[Alert]) -> Optional[FaultDiagnosis]:
         """Perform RAG and call Claude for diagnosis."""
+        self._refresh_client()
         if not self.client:
             logger.warning("Anthropic API key not set. Skipping AI diagnosis.")
             return self._get_mock_diagnosis(fv)
@@ -41,7 +57,7 @@ class ClaudeClient:
             
             # 3. Call Claude
             response = await self.client.messages.create(
-                model=settings.ANTHROPIC_MODEL,
+                model=self.model,
                 max_tokens=1000,
                 temperature=0,
                 messages=[{"role": "user", "content": prompt}]
@@ -74,14 +90,12 @@ class ClaudeClient:
 
     async def chat(self, user_message: str, machine_id: str, history: list[dict]) -> str:
         """Call Claude for RAG-based chat interaction with cross-unit awareness."""
+        self._refresh_client()
         if not self.client:
-            return "I am currently in simulation mode (No API Key). How can I help you today?"
+            return self._fallback_chat_response("missing API client")
 
         try:
-            from app.simulation import ALL_MACHINE_IDS, MACHINE_PROFILES, MACHINE_ALIASES
-            
-            # Resolve alias (Machine_5 -> sim-pump-001)
-            resolved_id = MACHINE_ALIASES.get(machine_id, machine_id)
+            resolved_id = machine_id
             
             # 1. Retrieve Context from Knowledge Base
             context = retriever.retrieve(user_message)
@@ -93,13 +107,13 @@ class ClaudeClient:
             
             # 3. Get cross-unit summary for ALL machines
             cross_unit_lines = []
-            for mid in ALL_MACHINE_IDS:
-                profile = MACHINE_PROFILES[mid]
+            active_machines = db.get_active_machines(minutes=30)
+            for mid in active_machines:
                 reading = db.get_latest_reading(mid)
                 alerts = db.get_alerts(mid, minutes=30, limit=5)
                 if reading:
                     cross_unit_lines.append(
-                        f"  - {profile['name']} ({mid}): "
+                        f"  - Device {mid} ({mid}): "
                         f"V={reading.get('voltage','?')}V, I={reading.get('current','?')}A, "
                         f"P={reading.get('active_power','?')}kW, PF={reading.get('power_factor','?')}, "
                         f"Temp={reading.get('temperature','?')}°C, "
@@ -107,15 +121,14 @@ class ClaudeClient:
                         f"Recent alerts: {len(alerts)}"
                     )
                 else:
-                    cross_unit_lines.append(f"  - {profile['name']} ({mid}): No data yet")
+                    cross_unit_lines.append(f"  - Device {mid} ({mid}): No data yet")
             
             cross_unit_summary = "\n".join(cross_unit_lines)
             
             # 4. Build the chat prompt
-            active_profile = MACHINE_PROFILES.get(resolved_id, {})
             system_prompt = f"""You are the Elicius AI Maintenance Copilot.
 You are assisting an industrial engineer with predictive maintenance.
-The currently selected asset is: {active_profile.get('name', resolved_id)} ({resolved_id}).
+The currently selected asset is: Device {resolved_id} ({resolved_id}).
 Use the real-time telemetry below AND the RAG knowledge base to answer accurately.
 Focus on ROI, technical reliability, and specific maintenance recommendations.
 When asked about comparisons across machines, use the FLEET OVERVIEW data.
@@ -145,7 +158,7 @@ KNOWLEDGE BASE CONTEXT:
             
             # 5. Call Claude
             response = await self.client.messages.create(
-                model=settings.ANTHROPIC_MODEL,
+                model=self.model,
                 max_tokens=1000,
                 temperature=0.7,
                 system=system_prompt,
@@ -156,7 +169,7 @@ KNOWLEDGE BASE CONTEXT:
             
         except Exception as e:
             logger.error(f"Error in Claude chat: {e}", exc_info=True)
-            return f"I encountered an error while processing your request: {str(e)}"
+            return self._fallback_chat_response(str(e))
 
     def _get_mock_diagnosis(self, fv: FeatureVector) -> FaultDiagnosis:
         """Fallback mock diagnosis for demo purposes without API key."""

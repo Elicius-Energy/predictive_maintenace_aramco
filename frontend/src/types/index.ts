@@ -5,7 +5,7 @@
 
 export type Severity = 'info' | 'warning' | 'critical';
 export type MachineStatusType = 'healthy' | 'warning' | 'critical' | 'offline';
-export type DataSource = 'mqtt' | 'simulated';
+export type DataSource = 'mqtt';
 
 export interface EnergyData {
   V: number;
@@ -62,6 +62,54 @@ export interface ElectricalFeatures {
   efficiency: number;
   load_percentage: number;
   energy_cumulative: number;
+  // ── 3-Phase Fields ─────────────────────────────────────────────────
+  is_three_phase?: boolean;
+  // Phase-to-neutral voltages
+  v1n?: number;
+  v2n?: number;
+  v3n?: number;
+  vln_avg?: number;
+  // Line-to-line voltages
+  v12?: number;
+  v23?: number;
+  v31?: number;
+  vll_avg?: number;
+  // Per-phase currents
+  i1?: number;
+  i2?: number;
+  i3?: number;
+  i_avg?: number;
+  // Per-phase Active Power (kW)
+  kw1?: number;
+  kw2?: number;
+  kw3?: number;
+  // Per-phase Reactive Power (kVAR)
+  kvar1?: number;
+  kvar2?: number;
+  kvar3?: number;
+  // Per-phase Apparent Power (kVA)
+  kva1?: number;
+  kva2?: number;
+  kva3?: number;
+  // Totals
+  t_kw?: number;
+  t_kvar?: number;
+  t_kva?: number;
+  // Per-phase Power Factor
+  pf1?: number;
+  pf2?: number;
+  pf3?: number;
+  pf_avg?: number;
+  // Energy counters
+  kwh_imp?: number;
+  kwh_exp?: number;
+  kvarh_imp?: number;
+  kvarh_exp?: number;
+  t_kvah?: number;
+  // Max Demand
+  md_kw?: number;
+  md_kvar?: number;
+  md_kva?: number;
 }
 
 export interface FeatureVector {

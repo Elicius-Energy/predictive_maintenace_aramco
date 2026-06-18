@@ -250,6 +250,16 @@ class Database:
             """, (machine_id, limit)).fetchall()
         return [dict(r) for r in rows]
     
+    def get_active_machines(self, minutes: int = 10) -> List[str]:
+        """Get list of machine IDs that have sent data recently."""
+        since = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat()
+        with self._get_conn() as conn:
+            rows = conn.execute("""
+                SELECT DISTINCT machine_id FROM sensor_readings 
+                WHERE timestamp > ?
+            """, (since,)).fetchall()
+        return [row["machine_id"] for row in rows]
+    
     def get_latest_reading(self, machine_id: str = "Machine_5") -> Optional[Dict]:
         """Get the most recent sensor reading."""
         with self._get_conn() as conn:

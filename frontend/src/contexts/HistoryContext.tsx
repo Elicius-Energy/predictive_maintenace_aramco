@@ -4,35 +4,41 @@ import axios from 'axios';
 import { useSensorData } from '../hooks/useSensorData';
 import { useMachine } from './MachineContext';
 import { BACKEND_URL } from '../utils/constants';
+import type { FeatureVector } from '../types';
 
 interface HistoryContextType {
   tempHistory: any[];
   anomalyHistory: any[];
   mechanicalHistory: any[];
   electricalHistory: any[];
+  latestHistoricalFeatures: FeatureVector | null;
   isFetching: boolean;
 }
 
 const HistoryContext = createContext<HistoryContextType | undefined>(undefined);
 
+// Max data points kept per history array
+const MAX_BUFFER = 500;
+
+/** Parse a timestamp string to epoch ms, handling optional trailing Z */
+function toEpoch(ts: string): number {
+  return new Date(ts.endsWith('Z') ? ts : ts + 'Z').getTime();
+}
+
 export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const { latestReading, latestFeatures } = useSensorData();
-  const { activeMachine, selectedWindow, isSimulated } = useMachine();
+  const { activeMachine, selectedWindow } = useMachine();
 
   const [tempHistory, setTempHistory] = useState<any[]>([]);
   const [anomalyHistory, setAnomalyHistory] = useState<any[]>([]);
   const [mechanicalHistory, setMechanicalHistory] = useState<any[]>([]);
   const [electricalHistory, setElectricalHistory] = useState<any[]>([]);
+  const [latestHistoricalFeatures, setLatestHistoricalFeatures] = useState<FeatureVector | null>(null);
   const [isFetching, setIsFetching] = useState(false);
 
   /** Fetch historical blocks from the database */
   const fetchHistory = useCallback(async () => {
-    if (!activeMachine || isSimulated) {
-      // In simulation mode, we just start fresh
-      setTempHistory([]);
-      setAnomalyHistory([]);
-      setMechanicalHistory([]);
-      setElectricalHistory([]);
+    if (!activeMachine) {
       return;
     }
 
@@ -49,102 +55,131 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
 
       // Backend returns newest first, we want oldest first for charts
       const readings = [...readingsRes.data].sort((a: any, b: any) => 
-        new Date(a.timestamp.endsWith('Z') ? a.timestamp : a.timestamp + 'Z').getTime() - new Date(b.timestamp.endsWith('Z') ? b.timestamp : b.timestamp + 'Z').getTime()
+        toEpoch(a.timestamp) - toEpoch(b.timestamp)
       );
       const features = [...featuresRes.data].sort((a: any, b: any) => 
-        new Date(a.timestamp.endsWith('Z') ? a.timestamp : a.timestamp + 'Z').getTime() - new Date(b.timestamp.endsWith('Z') ? b.timestamp : b.timestamp + 'Z').getTime()
+        toEpoch(a.timestamp) - toEpoch(b.timestamp)
       );
+
+      if (features.length > 0) {
+        setLatestHistoricalFeatures(features[features.length - 1].feature_data || features[features.length - 1]);
+      }
 
       setMechanicalHistory(readings.map((r: any) => ({
         timestamp: r.timestamp,
         ax: r.ax || 0,
         ay: r.ay || 0,
         az: r.az || 0,
-      })));
+      })).slice(-MAX_BUFFER));
 
-      setElectricalHistory(readings.map((r: any) => ({
-        timestamp: r.timestamp,
-        p: r.active_power || 0,
-        kva: r.apparent_power || 0,
-        i: r.current || 0,
-        pf: r.power_factor || 0,
-      })));
+      // Build electrical history from features (not readings) since features contain
+      // the full 3-phase data from ElectricalFeatures. The raw sensor_readings table
+      // doesn't store per-phase columns (v1n, i1, kw1, etc.).
+      setElectricalHistory(features.map((f: any) => {
+        const el = f.feature_data?.electrical || {};
+        return {
+          timestamp: f.timestamp,
+          dTS: el.dTS || 0,
+          p: el.active_power || 0,
+          kva: el.apparent_power || 0,
+          i: el.current || 0,
+          pf: el.power_factor || 0,
+          v1n: el.v1n || 0, v2n: el.v2n || 0, v3n: el.v3n || 0,
+          i1: el.i1 || 0, i2: el.i2 || 0, i3: el.i3 || 0,
+          kw1: el.kw1 || 0, kw2: el.kw2 || 0, kw3: el.kw3 || 0,
+        };
+      }).slice(-MAX_BUFFER));
 
       setTempHistory(features.map((f: any) => ({
         timestamp: f.timestamp,
         temperature: f.feature_data?.temperature || 0,
-      })));
+      })).slice(-MAX_BUFFER));
 
       setAnomalyHistory(features.map((f: any) => ({
         timestamp: f.timestamp,
         anomaly: (f.feature_data?.anomaly_score || 0) * 100,
         health: f.feature_data?.health_score || 0,
-      })));
+      })).slice(-MAX_BUFFER));
 
     } catch (err) {
       console.error('Failed to pre-load historical data:', err);
     } finally {
       setIsFetching(false);
     }
-  }, [activeMachine?.machine_id, selectedWindow, isSimulated]);
+  }, [activeMachine?.machine_id, selectedWindow]);
 
   // Trigger fetch on selection changes
   useEffect(() => {
     fetchHistory();
   }, [fetchHistory]);
 
-  // Update Mechanical & Electrical History via WebSocket (Append)
+  // Append sensor readings directly (no 1-second delay)
   useEffect(() => {
     if (latestReading && latestReading.machine_id === activeMachine?.machine_id) {
-      const readingTs = latestReading.timestamp.endsWith('Z') ? latestReading.timestamp : latestReading.timestamp + 'Z';
-      const cutoff = new Date(readingTs).getTime() - (selectedWindow * 60 * 1000);
+      const cutoff = Date.now() - selectedWindow * 60 * 1000;
       
       setMechanicalHistory(prev => {
-        const newData = [...prev, {
+        const merged = [...prev, {
           timestamp: latestReading.timestamp,
           ax: latestReading.accel?.ax || 0,
           ay: latestReading.accel?.ay || 0,
           az: latestReading.accel?.az || 0,
-        }].filter(d => new Date(d.timestamp.endsWith('Z') ? d.timestamp : d.timestamp + 'Z').getTime() >= cutoff);
-        return newData.slice(-2000); // Buffer size matching DB limit
+        }];
+        return merged.filter(d => toEpoch(d.timestamp) >= cutoff).slice(-MAX_BUFFER);
       });
 
-      if (latestReading.energy) {
-        setElectricalHistory(prev => {
-          const newData = [...prev, {
-            timestamp: latestReading.timestamp,
-            p: latestReading.energy?.P || 0,
-            kva: latestReading.energy?.KVA || 0,
-            i: latestReading.energy?.I || 0,
-            pf: latestReading.energy?.pf || 0,
-          }].filter(d => new Date(d.timestamp.endsWith('Z') ? d.timestamp : d.timestamp + 'Z').getTime() >= cutoff);
-          return newData.slice(-2000);
-        });
-      }
+      // NOTE: We intentionally do NOT append to electricalHistory here.
+      // The raw sensor_data message has a legacy EnergyData object without
+      // per-phase fields (v1n, i1, kw1 etc.), so appending it would inject
+      // rows with 0 values that pollute the chart tooltips.
+      // Instead, electricalHistory is populated exclusively from the
+      // latestFeatures effect below, which carries the full 3-phase data.
     }
   }, [latestReading, activeMachine?.machine_id, selectedWindow]);
 
-  // Update Other Params History via WebSocket (Append)
+  // Append feature data directly
   useEffect(() => {
     if (latestFeatures && latestFeatures.machine_id === activeMachine?.machine_id) {
-      const ts = latestFeatures.timestamp;
-      const parsedTs = ts.endsWith('Z') ? ts : ts + 'Z';
-      const cutoff = new Date(parsedTs).getTime() - (selectedWindow * 60 * 1000);
+      const cutoff = Date.now() - selectedWindow * 60 * 1000;
       
-      setTempHistory(prev => {
-        const newData = [...prev, {
-          timestamp: ts,
-          temperature: latestFeatures.temperature || 0,
-        }].filter(d => new Date(d.timestamp.endsWith('Z') ? d.timestamp : d.timestamp + 'Z').getTime() >= cutoff);
-        return newData.slice(-2000);
+      // Also update electrical history from features since it contains the full 3-phase data
+      setElectricalHistory(prev => {
+        const merged = [...prev, {
+          timestamp: latestFeatures.timestamp,
+          dTS: latestFeatures.electrical?.dTS || 0,
+          p: latestFeatures.electrical.active_power || 0,
+          kva: latestFeatures.electrical.apparent_power || 0,
+          i: latestFeatures.electrical.current || 0,
+          pf: latestFeatures.electrical.power_factor || 0,
+          v1n: latestFeatures.electrical.v1n || 0,
+          v2n: latestFeatures.electrical.v2n || 0,
+          v3n: latestFeatures.electrical.v3n || 0,
+          i1: latestFeatures.electrical.i1 || 0,
+          i2: latestFeatures.electrical.i2 || 0,
+          i3: latestFeatures.electrical.i3 || 0,
+          kw1: latestFeatures.electrical.kw1 || 0,
+          kw2: latestFeatures.electrical.kw2 || 0,
+          kw3: latestFeatures.electrical.kw3 || 0,
+        }];
+        // Deduplicate by timestamp if needed, but for simplicity just append and sort/filter
+        return merged.filter(d => toEpoch(d.timestamp) >= cutoff).slice(-MAX_BUFFER);
       });
+
+      setTempHistory(prev => {
+        const merged = [...prev, {
+          timestamp: latestFeatures.timestamp,
+          temperature: latestFeatures.temperature || 0,
+        }];
+        return merged.filter(d => toEpoch(d.timestamp) >= cutoff).slice(-MAX_BUFFER);
+      });
+      
       setAnomalyHistory(prev => {
-        const newData = [...prev, {
-          timestamp: ts,
+        const merged = [...prev, {
+          timestamp: latestFeatures.timestamp,
           anomaly: (latestFeatures.anomaly_score || 0) * 100,
           health: latestFeatures.health_score || 0,
-        }].filter(d => new Date(d.timestamp.endsWith('Z') ? d.timestamp : d.timestamp + 'Z').getTime() >= cutoff);
-        return newData.slice(-2000);
+        }];
+        return merged.filter(d => toEpoch(d.timestamp) >= cutoff).slice(-MAX_BUFFER);
       });
     }
   }, [latestFeatures, activeMachine?.machine_id, selectedWindow]);
@@ -155,6 +190,7 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
       anomalyHistory,
       mechanicalHistory,
       electricalHistory,
+      latestHistoricalFeatures,
       isFetching
     }}>
       {children}
@@ -169,3 +205,4 @@ export const useHistory = () => {
   }
   return context;
 };
+

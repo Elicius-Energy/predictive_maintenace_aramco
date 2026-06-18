@@ -3,6 +3,8 @@ import { useSensorData } from '../hooks/useSensorData';
 import { useHistory } from '../contexts/HistoryContext';
 import TimeSeriesChart from '../components/charts/TimeSeriesChart';
 import GaugeChart from '../components/charts/GaugeChart';
+import FormulaPanel from '../components/common/FormulaPanel';
+import { FORMULAS } from '../data/formulas';
 import { Thermometer, Gauge, Radio, ShieldCheck, AlertTriangle, Activity, Waves } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -14,17 +16,19 @@ function cn(...inputs: ClassValue[]) {
 
 const OtherParams: FC = () => {
   const { latestFeatures, latestHealth } = useSensorData();
-  const { tempHistory, anomalyHistory } = useHistory();
+  const { tempHistory, anomalyHistory, latestHistoricalFeatures } = useHistory();
 
-  const healthScore = latestFeatures?.health_score || 0;
-  const anomalyScore = latestFeatures?.anomaly_score || 0;
-  const temperature = latestFeatures?.temperature || 0;
+  const activeFeatures = latestFeatures || latestHistoricalFeatures;
+
+  const healthScore = activeFeatures?.health_score || 0;
+  const anomalyScore = activeFeatures?.anomaly_score || 0;
+  const temperature = activeFeatures?.temperature || 0;
 
   // Process FFT data if available (Limit to 0-100Hz for readability)
   const fftData = [];
-  if (latestFeatures?.vibration?.fft_frequencies && latestFeatures?.vibration?.fft_magnitudes) {
-    const freqs = latestFeatures.vibration.fft_frequencies;
-    const mags = latestFeatures.vibration.fft_magnitudes;
+  if (activeFeatures?.vibration?.fft_frequencies && activeFeatures?.vibration?.fft_magnitudes) {
+    const freqs = activeFeatures.vibration.fft_frequencies;
+    const mags = activeFeatures.vibration.fft_magnitudes;
     for (let i = 0; i < Math.min(freqs.length, mags.length); i++) {
       if (freqs[i] >= 0 && freqs[i] <= 100) {
         fftData.push({ frequency: parseFloat(freqs[i].toFixed(1)), magnitude: mags[i] });
@@ -53,39 +57,49 @@ const OtherParams: FC = () => {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
         <div className="industrial-card p-5 flex flex-col items-center">
            <GaugeChart value={temperature} min={0} max={120} unit="°C" label="Temperature" thresholds={{ warning: 75, critical: 95 }} />
+           <FormulaPanel items={FORMULAS.temperature} className="w-full" />
         </div>
         <div className="industrial-card p-5 flex flex-col items-center">
            <GaugeChart value={healthScore} min={0} max={100} unit="%" label="Health Score" thresholds={{ warning: 70, critical: 50 }} />
+           <FormulaPanel items={FORMULAS.healthScore} className="w-full" />
         </div>
         <div className="industrial-card p-5 flex flex-col items-center">
            <GaugeChart value={anomalyScore * 100} min={0} max={100} unit="%" label="Anomaly Score" thresholds={{ warning: 40, critical: 60 }} />
+           <FormulaPanel items={FORMULAS.healthScore} className="w-full" />
         </div>
         <div className="industrial-card p-5 flex flex-col items-center">
-           <GaugeChart value={latestFeatures?.electrical?.frequency || 0} min={49} max={51} unit="Hz" label="Grid Frequency" thresholds={{ warning: 50.5, critical: 50.8 }} />
+           <GaugeChart value={activeFeatures?.electrical?.frequency || 0} min={49} max={51} unit="Hz" label="Grid Frequency" thresholds={{ warning: 50.5, critical: 50.8 }} />
+           <FormulaPanel items={FORMULAS.energyAndFrequency} className="w-full" />
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="industrial-card p-6 h-[350px]">
-           <TimeSeriesChart 
-             data={tempHistory} 
-             title="Temperature Trend (°C)"
-             lines={[
-               { key: 'temperature', color: '#dc2626', name: 'Temperature' },
-             ]}
-             yDomain={[0, 120]}
-           />
+        <div className="industrial-card p-6">
+           <div className="h-[350px]">
+             <TimeSeriesChart 
+               data={tempHistory} 
+               title="Temperature Trend (°C)"
+               lines={[
+                 { key: 'temperature', color: '#dc2626', name: 'Temperature' },
+               ]}
+               yDomain={[0, 120]}
+             />
+           </div>
+           <FormulaPanel items={FORMULAS.temperature} />
         </div>
-        <div className="industrial-card p-6 h-[350px]">
-           <TimeSeriesChart 
-             data={anomalyHistory} 
-             title="AI Health & Anomaly Scores"
-             lines={[
-               { key: 'health', color: '#059669', name: 'Health Score' },
-               { key: 'anomaly', color: '#d97706', name: 'Anomaly Score' },
-             ]}
-             yDomain={[0, 100]}
-           />
+        <div className="industrial-card p-6">
+           <div className="h-[350px]">
+             <TimeSeriesChart 
+               data={anomalyHistory} 
+               title="AI Health & Anomaly Scores"
+               lines={[
+                 { key: 'health', color: '#059669', name: 'Health Score' },
+                 { key: 'anomaly', color: '#d97706', name: 'Anomaly Score' },
+               ]}
+               yDomain={[0, 100]}
+             />
+           </div>
+           <FormulaPanel items={FORMULAS.healthScore} />
         </div>
       </div>
 
@@ -140,6 +154,7 @@ const OtherParams: FC = () => {
             </div>
           )}
         </div>
+        <FormulaPanel items={FORMULAS.fft} />
       </div>
 
       {/* System Status */}
@@ -211,6 +226,7 @@ const OtherParams: FC = () => {
               </div>
             )}
           </div>
+          <FormulaPanel items={[...FORMULAS.bearingHealth, ...FORMULAS.imbalance, ...FORMULAS.healthScore]} />
         </div>
       </div>
     </div>

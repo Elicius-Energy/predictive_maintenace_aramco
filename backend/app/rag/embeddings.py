@@ -19,14 +19,37 @@ class EmbeddingManager:
     """Handles text chunking, embedding, and FAISS indexing with Smart Rebuild."""
     
     def __init__(self):
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.model = None
         self.index = None
         self.documents = []
         self.index_path = settings.FAISS_INDEX_PATH
         self.knowledge_dir = settings.KNOWLEDGE_BASE_DIR
+        self._model_load_failed = False
+
+    def _ensure_model(self) -> bool:
+        """Load embedding model lazily so the backend can still boot offline."""
+        if self.model is not None:
+          return True
+        if self._model_load_failed:
+          return False
+
+        try:
+            self.model = SentenceTransformer('all-MiniLM-L6-v2', local_files_only=True)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to load embedding model: {e}")
+            self._model_load_failed = True
+            self.model = None
+            return False
         
     def initialize(self):
         """Load knowledge base, embed, and build index with modification check."""
+        if not self._ensure_model():
+            logger.warning("Embedding model unavailable. RAG index initialization skipped.")
+            self.index = None
+            self.documents = []
+            return
+
         index_file = self.index_path + ".index"
         docs_file = self.index_path + ".docs"
         
@@ -61,6 +84,11 @@ class EmbeddingManager:
 
     def _build_index(self):
         """Read text and PDF files, chunk them, and create FAISS index."""
+        if not self._ensure_model():
+            self.index = None
+            self.documents = ["Knowledge base unavailable because the embedding model could not be loaded."]
+            return
+
         kb_path = Path(self.knowledge_dir)
         if not kb_path.exists():
             kb_path.mkdir(parents=True, exist_ok=True)

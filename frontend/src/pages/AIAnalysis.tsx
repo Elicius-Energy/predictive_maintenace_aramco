@@ -1,10 +1,16 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { FC } from 'react';
 import { useMachine } from '../contexts/MachineContext';
 import { useChat } from '../contexts/ChatContext';
+import { useSensorData } from '../hooks/useSensorData';
+import FormulaPanel from '../components/common/FormulaPanel';
+import { FORMULAS } from '../data/formulas';
 import { BACKEND_URL } from '../utils/constants';
+import { useReactToPrint } from 'react-to-print';
+import { PdfReportTemplate } from '../components/report/PdfReportTemplate';
+import { useHistory } from '../contexts/HistoryContext';
 import {
   BrainCircuit,
   Settings2,
@@ -40,9 +46,13 @@ type Mode = 'current' | 'fleet';
 const AIAnalysis: FC = () => {
   const { activeMachine, selectedWindow } = useMachine();
   const { messages, setMessages } = useChat();
+  const { latestFeatures, latestHealth } = useSensorData();
+  const { mechanicalHistory, electricalHistory } = useHistory();
   const [mode, setMode] = useState<Mode>('current');
   const [chatInput, setChatInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const pdfRef = useRef<HTMLDivElement>(null);
 
   // Machine-specific ROI data profiles (Relative Percentages)
   const MACHINE_ROI_PROFILES: Record<string, any[]> = {
@@ -97,6 +107,32 @@ const AIAnalysis: FC = () => {
   const currentJustification = mode === 'current' 
     ? (machineJustifications[activeId] || "Fleet-wide predictive maintenance strategy.")
     : "Implementing a fleet-wide predictive alignment strategy will yield a projected annual saving of $2.4M across all units.";
+
+  const latestAssistantSummary = [...messages]
+    .reverse()
+    .find((message) => message.role === 'assistant')?.content
+    ?.replace(/[#>*_`-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const energyWaste =
+    mode === 'current'
+      ? (activeId === 'sim-motor-003' ? '12.8' : (activeId === 'sim-pump-002' ? '6.4' : '1.2'))
+      : '20.4';
+
+  const downtimeDays =
+    mode === 'current'
+      ? (activeId === 'sim-motor-003' ? '14' : (activeId === 'sim-pump-002' ? '85' : '320'))
+      : '410';
+
+  const healthMetric = latestFeatures?.health_score ?? latestHealth?.health_score ?? 0;
+  const anomalyMetric = (latestFeatures?.anomaly_score ?? 0) * 100;
+  const reportSummary = latestAssistantSummary || `${currentJustification} Current machine health is ${healthMetric.toFixed(1)}% with anomaly exposure at ${anomalyMetric.toFixed(1)}%.`;
+
+  const handleDownloadPdf = useReactToPrint({
+    contentRef: pdfRef,
+    documentTitle: `ai-analysis-${activeId}-${selectedWindow}m`,
+  });
 
   // Use the env variable if injected by Vite, otherwise a fallback name for display
   const modelName = import.meta.env.VITE_ANTHROPIC_MODEL || 'Claude 3.5 Haiku';
@@ -153,6 +189,13 @@ const AIAnalysis: FC = () => {
             <Download size={14} />
             CSV Export
           </button>
+          <button
+            onClick={() => handleDownloadPdf()}
+            className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white hover:bg-primary-dark border border-primary rounded-lg text-xs font-bold transition-colors cursor-pointer"
+          >
+            <Download size={14} />
+            PDF Report
+          </button>
           <span className="px-3 py-1.5 bg-surface-muted rounded-lg text-xs font-semibold text-text-secondary border border-border">LLM ENGINE: {modelName.toUpperCase()}</span>
         </div>
       </div>
@@ -202,23 +245,18 @@ const AIAnalysis: FC = () => {
                 <div className="p-4 bg-surface rounded-xl border border-border">
                   <p className="text-xs text-text-muted uppercase font-bold tracking-tight">Energy Waste (Est)</p>
                   <p className="text-2xl font-extrabold text-accent-red scada-number mt-1">
-                    {mode === 'current' 
-                      ? (activeId === 'sim-motor-003' ? '12.8' : (activeId === 'sim-pump-002' ? '6.4' : '1.2'))
-                      : '20.4'
-                    } <span className="text-sm text-text-muted">kWh/day</span>
+                    {energyWaste} <span className="text-sm text-text-muted">kWh/day</span>
                   </p>
                 </div>
                 <div className="p-4 bg-surface rounded-xl border border-border">
                   <p className="text-xs text-text-muted uppercase font-bold tracking-tight">Predicted Downtime</p>
                   <p className="text-2xl font-extrabold text-accent-amber scada-number mt-1">
-                    {mode === 'current'
-                      ? (activeId === 'sim-motor-003' ? '14' : (activeId === 'sim-pump-002' ? '85' : '320'))
-                      : '410'
-                    } <span className="text-sm text-text-muted">Days away</span>
+                    {downtimeDays} <span className="text-sm text-text-muted">Days away</span>
                   </p>
                 </div>
               </div>
             </div>
+            <FormulaPanel items={FORMULAS.aiAnalytics} />
           </div>
 
           <div className="industrial-card p-6 border-l-4 border-l-primary">
@@ -256,6 +294,7 @@ const AIAnalysis: FC = () => {
                 </AreaChart>
               </ResponsiveContainer>
             </div>
+            <FormulaPanel items={FORMULAS.aiAnalytics} />
           </div>
 
           <div className="industrial-card p-6 border-l-4 border-l-amber-500">
@@ -274,6 +313,7 @@ const AIAnalysis: FC = () => {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+            <FormulaPanel items={[...FORMULAS.bearingHealth, ...FORMULAS.imbalance, ...FORMULAS.aiAnalytics]} />
           </div>
         </div>
 
@@ -340,6 +380,23 @@ const AIAnalysis: FC = () => {
             </form>
           </div>
         </div>
+      </div>
+      <div style={{ display: 'none' }}>
+        <PdfReportTemplate
+          ref={pdfRef}
+          machineId={activeId}
+          machineName={activeMachine?.name || activeId}
+          summary={reportSummary}
+          healthScore={healthMetric}
+          energyWaste={energyWaste}
+          downtimeDays={downtimeDays}
+          roiData={roiData}
+          riskData={riskData}
+          mechanicalHistory={mechanicalHistory}
+          electricalHistory={electricalHistory}
+          fftFrequencies={latestFeatures?.vibration?.fft_frequencies || []}
+          fftMagnitudes={latestFeatures?.vibration?.fft_magnitudes || []}
+        />
       </div>
     </div>
   );

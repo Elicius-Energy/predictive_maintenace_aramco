@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { FC } from 'react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -81,4 +82,4 @@ const GaugeChart: FC<GaugeChartProps> = ({ value, min, max, unit, label, thresho
   );
 };
 
-export default GaugeChart;
+export default memo(GaugeChart);

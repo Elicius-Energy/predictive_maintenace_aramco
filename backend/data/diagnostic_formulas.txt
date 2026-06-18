@@ -1,0 +1,64 @@
+Predictive Maintenance Diagnostic Formula Reference
+=================================================
+
+The equations below mirror the current logic used in the application for mechanical,
+electrical, thermal, anomaly, and health calculations.
+
+1. Vibration RMS and Overall Velocity
+   RMS_axis = sqrt(mean(a^2))
+   RMS_overall = sqrt(RMSx^2 + RMSy^2 + RMSz^2)
+
+2. Peak and Crest Factor
+   Peak_axis = max(abs(a))
+   Crest_Factor = Peakx / RMSx
+
+3. Kurtosis for Bearing Damage Detection
+   Kurtosis = E[(x - mu)^4] / sigma^4
+   Elevated kurtosis indicates impulsive behavior that is typical of early bearing pitting or cracking.
+
+4. FFT Magnitude and Dominant Frequency
+   Magnitude(f) = (2 / N) * |FFT(signal - mean(signal))|
+   Dominant_Frequency = frequency[argmax(Magnitude(f), f > 0)]
+
+5. Bearing Health Probability
+   P_bearing = clamp((max(kurtosis_x, kurtosis_y) / 4.0) + (RMS_overall / 15.0), 0.02, 0.95)
+
+6. Imbalance Probability
+   P_imbalance = clamp(RMS_overall / 8.0, 0.05, 0.90)
+
+7. Electrical Apparent Power and Efficiency
+   P_theoretical = V * I * sqrt(3)
+   Efficiency(%) = clamp((P_active / P_theoretical) * 100, 0, 100)
+
+8. Load Percentage
+   Load(%) = (P_active / 10.0) * 100
+   Note: the current implementation assumes a nominal 10 kW motor.
+
+9. Power Factor
+   PF = P_active / P_apparent
+
+10. Energy and Frequency Monitoring
+    Energy_cumulative = sum(P_active * delta_t)
+    Delta_f = |f_measured - f_nominal|
+
+11. Thermal Rule Thresholds
+    Warning if Temperature > 70 C
+    Critical if Temperature > 85 C
+
+12. Anomaly Score
+    Score_anomaly = clamp(1 - (decision_function(x) + 0.5), 0, 1)
+    Here x is the feature vector used by the Isolation Forest model.
+
+13. Aggregate Health Score
+    Health = 100 - penalties(alert severity, alert count, RMS_overall)
+
+14. ISO 10816 Zone Approximation
+    Zone A: RMS_overall <= 1.12 mm/s
+    Zone B: RMS_overall <= 2.8 mm/s
+    Zone C: RMS_overall <= 7.1 mm/s
+    Zone D: RMS_overall > 7.1 mm/s
+
+15. AI Analysis Business Metrics
+    Efficiency_Gain(%) = ((Baseline Energy - Current Energy) / Baseline Energy) * 100
+    Risk_Reduction(%) = ((Baseline Risk - Residual Risk) / Baseline Risk) * 100
+    Component_Risk(%) = weighted(vibration, thermal, electrical, historical alerts)

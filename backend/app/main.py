@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import db
 from app.mqtt_client import mqtt_client
-from app.simulation import simulation_engine, ALL_MACHINE_IDS
+
 from app.websocket_manager import ws_manager
 from app.models import WSMessage, SensorReading, DataSource, FeatureVector
 from app.feature_engineering import feature_extractor
@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
     mqtt_client.set_data_callback(data_pipeline_handler)
     
     # 4. Start Background Tasks
-    asyncio.create_task(simulation_task())
+
     asyncio.create_task(cleanup_task())
     
     if settings.ENABLE_AI_CONTINUOUS_DIAGNOSIS:
@@ -75,7 +75,8 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
+    allow_origin_regex=settings.CORS_ORIGIN_REGEX,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -120,6 +121,7 @@ async def data_pipeline_handler(reading: SensorReading):
             "temperature": reading.temperature
         }
         db.insert_reading(db_ready)
+        await ws_manager.broadcast(WSMessage(type="sensor_data", data=reading_dict))
         
         # 2. Extract Features
         fv = feature_extractor.extract_features(reading)
@@ -142,7 +144,6 @@ async def data_pipeline_handler(reading: SensorReading):
             db.insert_features(fv.machine_id, fv.model_dump(mode='json'))
             
             # 5. Broadcast Real-time
-            await ws_manager.broadcast(WSMessage(type="sensor_data", data=reading_dict))
             await ws_manager.broadcast(WSMessage(type="features", data=fv.model_dump(mode='json')))
             await ws_manager.broadcast(WSMessage(type="machine_health", data=health_summary.model_dump(mode='json')))
             
@@ -151,33 +152,14 @@ async def data_pipeline_handler(reading: SensorReading):
 
 # ── Background Tasks ─────────────────────────────────────────────────────
 
-async def simulation_task():
-    """Fallback simulator when MQTT is unavailable.
-    Generates readings for all registered machines."""
-    logger.info("Simulation task started.")
-    while True:
-        try:
-            # We want to keep simulated machines running always, and only simulate MQTT ones when stale
-            if settings.SIMULATION_MODE == "always" or settings.SIMULATION_MODE == "auto":
-                for reading in simulation_engine.generate_all_readings():
-                    # If this is our real machine and we have fresh MQTT data, skip the simulation reading
-                    if reading.machine_id == "Machine_10" and settings.SIMULATION_MODE == "auto":
-                        if not mqtt_client.is_stale:
-                            continue
-                    
-                    await data_pipeline_handler(reading)
-                    await asyncio.sleep(0.1)
-                
-            await asyncio.sleep(settings.SIMULATION_INTERVAL_MS / 1000.0)
-        except Exception as e:
-            logger.error(f"Simulation task error: {e}", exc_info=True)
-            await asyncio.sleep(1)
+
 
 async def ai_diagnosis_task():
     """Periodic AI reasoning task — cycles through all machines."""
     logger.info("AI Diagnosis background task started.")
     while True:
-        for machine_id in ALL_MACHINE_IDS:
+        active_machines = db.get_active_machines(minutes=10)
+        for machine_id in active_machines:
             try:
                 # 1. Get latest features for this machine
                 feats = db.get_features(machine_id=machine_id, minutes=1)
