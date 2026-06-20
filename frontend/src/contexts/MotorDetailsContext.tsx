@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useCallback } from 'react';
 import type { ReactNode, FC } from 'react';
 
 export interface MotorDetails {
@@ -22,19 +22,6 @@ interface MotorDetailsContextType {
 }
 
 const STORAGE_KEY = 'ledl_motor_details';
-
-const defaultMotorDetails: MotorDetails = {
-  motorName: '',
-  location: '',
-  connectedLoad: '',
-  motorType: 'Induction Motor',
-  manufacturer: '',
-  ratedPower: 0,
-  ratedEfficiency: 0,
-  motorPrice: 0,
-  electricityCost: 0,
-  nameplateImage: null,
-};
 
 const MotorDetailsContext = createContext<MotorDetailsContextType | undefined>(undefined);
 
