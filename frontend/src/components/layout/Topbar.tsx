@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { FC } from 'react';
-import { useMachine, TIME_WINDOWS } from '../../contexts/MachineContext';
+import { useMachine } from '../../contexts/MachineContext';
 import { useSensorData } from '../../hooks/useSensorData';
 import { 
   Bell, 
@@ -19,7 +19,7 @@ function cn(...inputs: ClassValue[]) {
 }
 
 const Topbar: FC = () => {
-  const { activeMachine, machines, setActiveMachine, selectedWindow, setSelectedWindow } = useMachine();
+  const { activeMachine, machines, setActiveMachine, timeRange, setTimeRange } = useMachine();
   const { isConnected, activeAlerts, latestHealth } = useSensorData();
   const [time, setTime] = useState(new Date());
 
@@ -64,22 +64,27 @@ const Topbar: FC = () => {
 
         <div className="h-6 w-px bg-border" />
 
-        {/* Time Window Selector */}
-        <div className="flex items-center gap-1.5 bg-surface-muted p-1 rounded-lg border border-border">
-          {TIME_WINDOWS.map((win) => (
-            <button
-              key={win.minutes}
-              onClick={() => setSelectedWindow(win.minutes)}
-              className={cn(
-                "px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all whitespace-nowrap",
-                selectedWindow === win.minutes 
-                  ? "bg-primary text-white shadow-sm" 
-                  : "text-text-muted hover:text-text-primary"
-              )}
-            >
-              {win.label}
-            </button>
-          ))}
+        {/* Datetime Range Selector */}
+        <div className="flex items-center gap-3 bg-surface-muted p-1.5 rounded-lg border border-border">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-text-muted font-bold uppercase tracking-wider">Start</span>
+            <input 
+              type="datetime-local" 
+              value={timeRange.start}
+              onChange={(e) => setTimeRange({ ...timeRange, start: e.target.value })}
+              className="bg-surface text-xs font-mono font-bold text-text-primary px-2 py-1 rounded border border-border focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-all"
+            />
+          </div>
+          <div className="w-px h-4 bg-border" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-text-muted font-bold uppercase tracking-wider">End</span>
+            <input 
+              type="datetime-local" 
+              value={timeRange.end}
+              onChange={(e) => setTimeRange({ ...timeRange, end: e.target.value })}
+              className="bg-surface text-xs font-mono font-bold text-text-primary px-2 py-1 rounded border border-border focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-all"
+            />
+          </div>
         </div>
       </div>
 

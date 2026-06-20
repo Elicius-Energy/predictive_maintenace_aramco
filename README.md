@@ -1,4 +1,4 @@
-# Saudi Aramco Predictive Maintenance Dashboard
+# LEDL Predictive Maintenance Dashboard
 
 Professional IIoT Condition Monitoring & AI-Driven Diagnostics Platform.
 
@@ -56,7 +56,7 @@ The RAG system is pre-loaded with document chunks in `backend/data/knowledge`:
 - `electrical_faults.txt`: MCSA and power quality metrics.
 - `predictive_maintenance_guide.txt`: General PdM methodology.
 
-## 🛡️ Saudi Aramco Demo Specs
+## 🛡️ LEDL Demo Specs
 - **Facility**: Ras Tanura Refinery
 - **Unit**: Processing Unit 3 (Hydrocracker)
 - **Asset**: Machine_5 (Centrifugal Pump P-105)

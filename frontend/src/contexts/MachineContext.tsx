@@ -10,17 +10,11 @@ interface MachineContextType {
   machines: MachineInfo[];
   loading: boolean;
   refreshMachines: () => Promise<void>;
-  selectedWindow: number;
-  setSelectedWindow: (minutes: number) => void;
+  timeRange: { start: string; end: string };
+  setTimeRange: (range: { start: string; end: string }) => void;
 }
 
-export const TIME_WINDOWS = [
-  { label: '1m', minutes: 1 },
-  { label: '5m', minutes: 5 },
-  { label: '15m', minutes: 15 },
-  { label: '1h', minutes: 60 },
-  { label: 'All Time', minutes: 4320 },
-];
+// Removed TIME_WINDOWS
 
 const MachineContext = createContext<MachineContextType | undefined>(undefined);
 
@@ -28,7 +22,17 @@ export const MachineProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [activeMachine, setActiveMachine] = useState<MachineInfo | null>(null);
   const [machines, setMachines] = useState<MachineInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedWindow, setSelectedWindow] = useState<number>(5);
+  const now = new Date();
+  const defaultStart = new Date(now.getTime() - 5 * 60000);
+  const formatDateTimeLocal = (d: Date) => {
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const [timeRange, setTimeRange] = useState<{ start: string; end: string }>({
+    start: formatDateTimeLocal(defaultStart),
+    end: formatDateTimeLocal(now)
+  });
   const userSelectedRef = useRef(false);
 
   const handleSetActiveMachine = useCallback((machine: MachineInfo | null) => {
@@ -66,8 +70,8 @@ export const MachineProvider: FC<{ children: ReactNode }> = ({ children }) => {
       machines, 
       loading, 
       refreshMachines,
-      selectedWindow,
-      setSelectedWindow
+      timeRange,
+      setTimeRange
     }}>
       {children}
     </MachineContext.Provider>

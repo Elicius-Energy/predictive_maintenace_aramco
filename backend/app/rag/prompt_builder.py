@@ -1,5 +1,5 @@
 """
-Builds structured prompts for Anthropic Claude.
+Builds structured prompts for OpenAI API.
 """
 from typing import List, Dict, Any
 from app.models import FeatureVector, Alert

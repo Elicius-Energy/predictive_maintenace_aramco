@@ -2,6 +2,7 @@ import type { FC } from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
+import MotorDetailsSummary from '../common/MotorDetailsSummary';
 
 const Layout: FC = () => {
   return (
@@ -10,7 +11,8 @@ const Layout: FC = () => {
       <div className="flex-1 flex flex-col min-w-0">
         <Topbar />
         <main className="flex-1 overflow-y-auto p-6 bg-surface-muted">
-          <div className="max-w-[1600px] mx-auto min-h-full">
+          <div className="max-w-[1600px] mx-auto min-h-full space-y-4">
+            <MotorDetailsSummary />
             <Outlet />
           </div>
         </main>

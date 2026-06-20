@@ -6,7 +6,8 @@ import {
   Zap,
   Settings2,
   BrainCircuit,
-  LogOut
+  LogOut,
+  Cpu
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -16,7 +17,8 @@ function cn(...inputs: ClassValue[]) {
 }
 
 const navItems = [
-  { path: '/', name: 'Asset Selector', icon: LayoutDashboard },
+  { path: '/', name: 'Motor Setup', icon: Cpu },
+  { path: '/machines', name: 'Asset Selector', icon: LayoutDashboard },
   { path: '/dashboard/mechanical', name: 'Mechanical Params', icon: Activity },
   { path: '/dashboard/electrical', name: 'Electrical Params', icon: Zap },
   { path: '/dashboard/other', name: 'Auxiliary Metrics', icon: Settings2 },

@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.database import db
 from app.models import FaultDiagnosis, FeatureVector
-from app.rag.claude_client import ai_client
+from app.rag.openai_client import ai_client
 from app.feature_engineering import feature_extractor
 from typing import List
 

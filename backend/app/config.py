@@ -28,9 +28,9 @@ class Settings(BaseSettings):
     SIMULATION_MODE: str = "auto"  # "auto", "always", "never"
     SIMULATION_INTERVAL_MS: int = 1000
     
-    # Anthropic API
-    ANTHROPIC_API_KEY: Optional[str] = None
-    ANTHROPIC_MODEL: str = "claude-3-5-sonnet-latest"
+    # OpenAI API
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_MODEL: str = "gpt-4o"
     RAG_CACHE_TTL_SECONDS: int = 30
     RAG_AUTO_INTERVAL_SECONDS: int = 60
     ENABLE_AI_CONTINUOUS_DIAGNOSIS: bool = False

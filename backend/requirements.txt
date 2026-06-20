@@ -19,7 +19,7 @@ scipy==1.15.0
 scikit-learn==1.6.1
 
 # RAG / AI
-anthropic==0.42.0
+openai>=1.0.0
 faiss-cpu==1.9.0.post1
 sentence-transformers==3.3.1
 pypdf==5.1.0

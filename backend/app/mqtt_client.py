@@ -5,6 +5,7 @@ import json
 import asyncio
 import logging
 import time
+import uuid
 from typing import Callable, Optional
 from datetime import datetime
 
@@ -161,7 +162,8 @@ class MQTTClient:
         self._loop = loop
         self._running = True
         
-        self.client = mqtt.Client(client_id=settings.MQTT_CLIENT_ID)
+        client_id = f"{settings.MQTT_CLIENT_ID}_{uuid.uuid4().hex[:8]}"
+        self.client = mqtt.Client(client_id=client_id)
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
         self.client.on_message = self._on_message

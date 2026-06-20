@@ -98,7 +98,12 @@ export const PdfReportTemplate = forwardRef<HTMLDivElement, PdfReportProps>(({
             <TimeSeriesChart 
               data={electricalHistory} 
               title="" 
-              lines={[{ key: 'p', color: '#0891b2', name: 'Active Power (kW)' }, { key: 'kva', color: '#7c3aed', name: 'Apparent Power (kVA)' }]}
+              lines={[
+                { key: 'kw1', color: '#ef4444', name: 'L1 Power (kW)' },
+                { key: 'kw2', color: '#f59e0b', name: 'L2 Power (kW)' },
+                { key: 'kw3', color: '#3b82f6', name: 'L3 Power (kW)' },
+                { key: 't_kva', color: '#8b5cf6', name: 'Total Apparent Power (kVA)' }
+              ]}
             />
           </div>
           <div className="h-[250px] bg-surface-muted border border-border p-3 rounded-xl">
@@ -106,7 +111,11 @@ export const PdfReportTemplate = forwardRef<HTMLDivElement, PdfReportProps>(({
             <TimeSeriesChart 
               data={electricalHistory} 
               title="" 
-              lines={[{ key: 'i', color: '#f59e0b', name: 'Line Current (A)' }]}
+              lines={[
+                { key: 'i1', color: '#ef4444', name: 'L1 Current (A)' },
+                { key: 'i2', color: '#f59e0b', name: 'L2 Current (A)' },
+                { key: 'i3', color: '#3b82f6', name: 'L3 Current (A)' }
+              ]}
             />
           </div>
         </div>

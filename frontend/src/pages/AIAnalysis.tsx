@@ -44,7 +44,7 @@ function cn(...inputs: ClassValue[]) {
 type Mode = 'current' | 'fleet';
 
 const AIAnalysis: FC = () => {
-  const { activeMachine, selectedWindow } = useMachine();
+  const { activeMachine, timeRange } = useMachine();
   const { messages, setMessages } = useChat();
   const { latestFeatures, latestHealth } = useSensorData();
   const { mechanicalHistory, electricalHistory } = useHistory();
@@ -130,7 +130,7 @@ const AIAnalysis: FC = () => {
 
   const handleDownloadPdf = useReactToPrint({
     contentRef: pdfRef,
-    documentTitle: `ai-analysis-${activeId}-${selectedWindow}m`,
+    documentTitle: `ai-analysis-${activeId}-${timeRange.start}-to-${timeRange.end}`,
   });
 
   // Use the env variable if injected by Vite, otherwise a fallback name for display
@@ -182,7 +182,7 @@ const AIAnalysis: FC = () => {
         </div>
         <div className="flex items-center gap-4">
           <button
-            onClick={() => window.open(`${BACKEND_URL}/api/data/download_csv?machine_id=${activeId}&minutes=${selectedWindow}`)}
+            onClick={() => window.open(`${BACKEND_URL}/api/data/download_csv?machine_id=${activeId}&start_time=${new Date(timeRange.start).toISOString()}&end_time=${new Date(timeRange.end).toISOString()}`)}
             className="flex items-center gap-2 px-3 py-1.5 bg-surface-muted hover:bg-surface border border-border rounded-lg text-xs font-bold text-text-primary transition-colors cursor-pointer"
           >
             <Download size={14} />

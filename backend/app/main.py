@@ -20,7 +20,7 @@ from app.models import WSMessage, SensorReading, DataSource, FeatureVector
 from app.feature_engineering import feature_extractor
 from app.rule_engine import rule_engine
 from app.ml_engine import ml_engine
-from app.rag.claude_client import ai_client
+from app.rag.openai_client import ai_client
 from app.rag.embeddings import embedding_manager
 
 from app.routes import data, ws, rag
@@ -37,10 +37,10 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup tasks
-    logger.info("Initializing Saudi Aramco PdM System...")
+    logger.info("Initializing LEDL PdM System...")
     
-    # 1. Initialize RAG Index
-    embedding_manager.initialize()
+    # 1. Initialize RAG Index in the background so it doesn't block MQTT startup
+    asyncio.create_task(asyncio.to_thread(embedding_manager.initialize))
     
     # 2. Start MQTT Client
     loop = asyncio.get_running_loop()
@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI):
 # ── App Definition ────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="Elicius Predictive Maintenance - Saudi Aramco Demo",
+    title="Elicius Predictive Maintenance - LEDL Demo",
     description="Real-time IoT PdM with RAG-based AI Insights",
     version="1.0.0",
     lifespan=lifespan
@@ -173,7 +173,7 @@ async def ai_diagnosis_task():
                     from app.models import Alert
                     alert_objs = [Alert(**a) for a in recent_alerts]
                     
-                    # 3. Call Claude
+                    # 3. Call OpenAI
                     diagnosis = await ai_client.get_diagnosis(fv, alert_objs)
                     if diagnosis:
                         db.insert_diagnosis(diagnosis.model_dump())
@@ -195,7 +195,7 @@ async def cleanup_task():
 async def root():
     return {
         "status": "online",
-        "system": "Saudi Aramco Predictive Maintenance Dashboard",
+        "system": "LEDL Predictive Maintenance Dashboard",
         "backend": "FastAPI",
         "agent": "Antigravity AI",
         "timestamp": datetime.utcnow().isoformat()

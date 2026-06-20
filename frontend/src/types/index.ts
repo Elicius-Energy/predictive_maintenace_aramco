@@ -1,5 +1,5 @@
 /**
- * Shared types for the Saudi Aramco PdM system.
+ * Shared types for the LEDL PdM system.
  * Mirrors the backend models.
  */
 

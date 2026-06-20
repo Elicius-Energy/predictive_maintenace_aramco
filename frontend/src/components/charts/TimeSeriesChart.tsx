@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { useMemo } from 'react';
 import type { FC } from 'react';
 import {
   LineChart,
@@ -108,4 +108,4 @@ const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ data, lines, yDomain, title
   );
 };
 
-export default memo(TimeSeriesChart);
+export default TimeSeriesChart;

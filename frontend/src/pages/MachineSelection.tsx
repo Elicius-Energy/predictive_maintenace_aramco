@@ -28,7 +28,7 @@ const MachineSelection: FC = () => {
         </div>
         <div className="flex items-center gap-3">
           <p className="text-text-secondary text-base max-w-2xl">
-            Industrial assets across Saudi Aramco refining facilities. Select a machine to view real-time diagnostics.
+            Industrial assets across LEDL facilities. Select a machine to view real-time diagnostics.
           </p>
          </div>
       </div>

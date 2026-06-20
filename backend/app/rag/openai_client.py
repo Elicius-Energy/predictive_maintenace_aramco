@@ -1,11 +1,11 @@
 """
-Anthropic Claude client for AI reasoning.
+OpenAI client for AI reasoning.
 """
 import logging
 import json
 import asyncio
 from typing import Optional
-from anthropic import AsyncAnthropic
+from openai import AsyncOpenAI
 
 from app.config import settings, get_runtime_settings
 from app.models import FeatureVector, FaultDiagnosis, Alert, Severity
@@ -15,35 +15,35 @@ from app.database import db
 
 logger = logging.getLogger(__name__)
 
-class ClaudeClient:
-    """Client for Anthropic API integration."""
+class OpenAIClient:
+    """Client for OpenAI API integration."""
     
     def __init__(self):
         self.api_key = None
-        self.model = settings.ANTHROPIC_MODEL
+        self.model = settings.OPENAI_MODEL
         self.client = None
         self._refresh_client()
 
     def _refresh_client(self):
         """Always prefer the latest `.env` values over import-time state."""
         runtime_settings = get_runtime_settings()
-        self.api_key = runtime_settings.ANTHROPIC_API_KEY
-        self.model = runtime_settings.ANTHROPIC_MODEL
-        self.client = AsyncAnthropic(api_key=self.api_key) if self.api_key else None
+        self.api_key = runtime_settings.OPENAI_API_KEY
+        self.model = runtime_settings.OPENAI_MODEL
+        self.client = AsyncOpenAI(api_key=self.api_key) if self.api_key else None
 
     def _fallback_chat_response(self, reason: str) -> str:
         return (
-            "AI analysis is temporarily unavailable from Anthropic, so I am falling back to a local summary. "
+            "AI analysis is temporarily unavailable from OpenAI, so I am falling back to a local summary. "
             f"Reason: {reason}. "
             f"Current model from `.env`: {self.model or 'not set'}. "
-            "Please verify that the backend is running and that `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL` are valid in `.env`."
+            "Please verify that the backend is running and that `OPENAI_API_KEY` and `OPENAI_MODEL` are valid in `.env`."
         )
             
     async def get_diagnosis(self, fv: FeatureVector, recent_alerts: list[Alert]) -> Optional[FaultDiagnosis]:
         """Perform RAG and call Claude for diagnosis."""
         self._refresh_client()
         if not self.client:
-            logger.warning("Anthropic API key not set. Skipping AI diagnosis.")
+            logger.warning("OpenAI API key not set. Skipping AI diagnosis.")
             return self._get_mock_diagnosis(fv)
 
         try:
@@ -55,17 +55,16 @@ class ClaudeClient:
             # 2. Build Prompt
             prompt = prompt_builder.build_diagnosis_prompt(fv, context, recent_alerts)
             
-            # 3. Call Claude
-            response = await self.client.messages.create(
+            # 3. Call OpenAI
+            response = await self.client.chat.completions.create(
                 model=self.model,
-                max_tokens=1000,
                 temperature=0,
                 messages=[{"role": "user", "content": prompt}]
             )
             
             # 4. Parse Response
-            content = response.content[0].text
-            # Attempt to find JSON in response (in case Claude adds text around it)
+            content = response.choices[0].message.content
+            # Attempt to find JSON in response (in case OpenAI adds text around it)
             import re
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
@@ -85,11 +84,11 @@ class ClaudeClient:
                 return None
                 
         except Exception as e:
-            logger.error(f"Error calling Anthropic API: {e}")
+            logger.error(f"Error calling OpenAI API: {e}")
             return None
 
     async def chat(self, user_message: str, machine_id: str, history: list[dict]) -> str:
-        """Call Claude for RAG-based chat interaction with cross-unit awareness."""
+        """Call OpenAI for RAG-based chat interaction with cross-unit awareness."""
         self._refresh_client()
         if not self.client:
             return self._fallback_chat_response("missing API client")
@@ -156,19 +155,20 @@ KNOWLEDGE BASE CONTEXT:
             
             messages.append({"role": "user", "content": user_message})
             
-            # 5. Call Claude
-            response = await self.client.messages.create(
+            # 5. Call OpenAI
+            response = await self.client.chat.completions.create(
                 model=self.model,
-                max_tokens=1000,
                 temperature=0.7,
-                system=system_prompt,
-                messages=messages
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    *messages
+                ]
             )
             
-            return response.content[0].text
+            return response.choices[0].message.content
             
         except Exception as e:
-            logger.error(f"Error in Claude chat: {e}", exc_info=True)
+            logger.error(f"Error in OpenAI chat: {e}", exc_info=True)
             return self._fallback_chat_response(str(e))
 
     def _get_mock_diagnosis(self, fv: FeatureVector) -> FaultDiagnosis:
@@ -192,4 +192,4 @@ KNOWLEDGE BASE CONTEXT:
         )
 
 # Singleton
-ai_client = ClaudeClient()
+ai_client = OpenAIClient()

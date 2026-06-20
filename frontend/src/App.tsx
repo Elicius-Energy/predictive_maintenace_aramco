@@ -4,9 +4,11 @@ import { MachineProvider } from './contexts/MachineContext';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 import { HistoryProvider } from './contexts/HistoryContext';
 import { ChatProvider } from './contexts/ChatContext';
+import { MotorDetailsProvider } from './contexts/MotorDetailsContext';
 import Layout from './components/layout/Layout';
 
 // Real Pages
+import MotorDetailsForm from './pages/MotorDetailsForm';
 import MachineSelection from './pages/MachineSelection';
 import MechanicalParams from './pages/MechanicalParams';
 import ElectricalParams from './pages/ElectricalParams';
@@ -24,27 +26,30 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
 const App: FC = () => {
   return (
-    <MachineProvider>
-      <WebSocketProvider>
-        <HistoryProvider>
-          <ChatProvider>
-            <BrowserRouter>
-              <Routes>
-                <Route path="/login" element={<Login />} />
-                <Route path="/" element={<ProtectedRoute><MachineSelection /></ProtectedRoute>} />
-                <Route path="/dashboard" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-                  <Route index element={<MechanicalParams />} />
-                  <Route path="mechanical" element={<MechanicalParams />} />
-                  <Route path="electrical" element={<ElectricalParams />} />
-                  <Route path="other" element={<OtherParams />} />
-                  <Route path="ai-analysis" element={<AIAnalysis />} />
-                </Route>
-              </Routes>
-            </BrowserRouter>
-          </ChatProvider>
-        </HistoryProvider>
-      </WebSocketProvider>
-    </MachineProvider>
+    <MotorDetailsProvider>
+      <MachineProvider>
+        <WebSocketProvider>
+          <HistoryProvider>
+            <ChatProvider>
+              <BrowserRouter>
+                <Routes>
+                  <Route path="/login" element={<Login />} />
+                  <Route path="/" element={<ProtectedRoute><MotorDetailsForm /></ProtectedRoute>} />
+                  <Route path="/machines" element={<ProtectedRoute><MachineSelection /></ProtectedRoute>} />
+                  <Route path="/dashboard" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+                    <Route index element={<MechanicalParams />} />
+                    <Route path="mechanical" element={<MechanicalParams />} />
+                    <Route path="electrical" element={<ElectricalParams />} />
+                    <Route path="other" element={<OtherParams />} />
+                    <Route path="ai-analysis" element={<AIAnalysis />} />
+                  </Route>
+                </Routes>
+              </BrowserRouter>
+            </ChatProvider>
+          </HistoryProvider>
+        </WebSocketProvider>
+      </MachineProvider>
+    </MotorDetailsProvider>
   );
 };
 

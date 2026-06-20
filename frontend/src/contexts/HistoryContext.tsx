@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import type { ReactNode, FC } from 'react';
 import axios from 'axios';
 import { useSensorData } from '../hooks/useSensorData';
@@ -13,6 +13,7 @@ interface HistoryContextType {
   electricalHistory: any[];
   latestHistoricalFeatures: FeatureVector | null;
   isFetching: boolean;
+  periodEnergy: number; // kWh integrated over selected time window
 }
 
 const HistoryContext = createContext<HistoryContextType | undefined>(undefined);
@@ -27,7 +28,7 @@ function toEpoch(ts: string): number {
 
 export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const { latestReading, latestFeatures } = useSensorData();
-  const { activeMachine, selectedWindow } = useMachine();
+  const { activeMachine, timeRange } = useMachine();
 
   const [tempHistory, setTempHistory] = useState<any[]>([]);
   const [anomalyHistory, setAnomalyHistory] = useState<any[]>([]);
@@ -46,10 +47,18 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
     try {
       const [readingsRes, featuresRes] = await Promise.all([
         axios.get(`${BACKEND_URL}/api/data/history`, {
-          params: { machine_id: activeMachine.machine_id, minutes: selectedWindow }
+          params: { 
+            machine_id: activeMachine.machine_id, 
+            start_time: new Date(timeRange.start).toISOString(),
+            end_time: new Date(timeRange.end).toISOString()
+          }
         }),
         axios.get(`${BACKEND_URL}/api/data/features`, {
-          params: { machine_id: activeMachine.machine_id, minutes: selectedWindow }
+          params: { 
+            machine_id: activeMachine.machine_id, 
+            start_time: new Date(timeRange.start).toISOString(),
+            end_time: new Date(timeRange.end).toISOString()
+          }
         })
       ]);
 
@@ -85,6 +94,7 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
           i: el.current || 0,
           pf: el.power_factor || 0,
           v1n: el.v1n || 0, v2n: el.v2n || 0, v3n: el.v3n || 0,
+          v12: el.v12 || 0, v23: el.v23 || 0, v31: el.v31 || 0,
           i1: el.i1 || 0, i2: el.i2 || 0, i3: el.i3 || 0,
           kw1: el.kw1 || 0, kw2: el.kw2 || 0, kw3: el.kw3 || 0,
         };
@@ -106,7 +116,7 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
     } finally {
       setIsFetching(false);
     }
-  }, [activeMachine?.machine_id, selectedWindow]);
+  }, [activeMachine?.machine_id, timeRange.start, timeRange.end]);
 
   // Trigger fetch on selection changes
   useEffect(() => {
@@ -116,7 +126,13 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
   // Append sensor readings directly (no 1-second delay)
   useEffect(() => {
     if (latestReading && latestReading.machine_id === activeMachine?.machine_id) {
-      const cutoff = Date.now() - selectedWindow * 60 * 1000;
+      const startMs = new Date(timeRange.start).getTime();
+      const endMs = new Date(timeRange.end).getTime();
+      
+      // If viewing historical data, don't append live data
+      if (Date.now() - endMs > 60000) return;
+      
+      const cutoff = startMs;
       
       setMechanicalHistory(prev => {
         const merged = [...prev, {
@@ -135,12 +151,17 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
       // Instead, electricalHistory is populated exclusively from the
       // latestFeatures effect below, which carries the full 3-phase data.
     }
-  }, [latestReading, activeMachine?.machine_id, selectedWindow]);
+  }, [latestReading, activeMachine?.machine_id, timeRange.start, timeRange.end]);
 
   // Append feature data directly
   useEffect(() => {
     if (latestFeatures && latestFeatures.machine_id === activeMachine?.machine_id) {
-      const cutoff = Date.now() - selectedWindow * 60 * 1000;
+      const startMs = new Date(timeRange.start).getTime();
+      const endMs = new Date(timeRange.end).getTime();
+      
+      if (Date.now() - endMs > 60000) return;
+      
+      const cutoff = startMs;
       
       // Also update electrical history from features since it contains the full 3-phase data
       setElectricalHistory(prev => {
@@ -154,6 +175,9 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
           v1n: latestFeatures.electrical.v1n || 0,
           v2n: latestFeatures.electrical.v2n || 0,
           v3n: latestFeatures.electrical.v3n || 0,
+          v12: latestFeatures.electrical.v12 || 0,
+          v23: latestFeatures.electrical.v23 || 0,
+          v31: latestFeatures.electrical.v31 || 0,
           i1: latestFeatures.electrical.i1 || 0,
           i2: latestFeatures.electrical.i2 || 0,
           i3: latestFeatures.electrical.i3 || 0,
@@ -182,7 +206,24 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
         return merged.filter(d => toEpoch(d.timestamp) >= cutoff).slice(-MAX_BUFFER);
       });
     }
-  }, [latestFeatures, activeMachine?.machine_id, selectedWindow]);
+  }, [latestFeatures, activeMachine?.machine_id, timeRange.start, timeRange.end]);
+
+  // Compute period energy by trapezoid integration of active power over the time window
+  const periodEnergy = useMemo(() => {
+    if (electricalHistory.length < 2) return 0;
+    let totalKwh = 0;
+    for (let i = 1; i < electricalHistory.length; i++) {
+      const p0 = electricalHistory[i - 1].p || 0; // active power in kW
+      const p1 = electricalHistory[i].p || 0;
+      const t0 = toEpoch(electricalHistory[i - 1].timestamp);
+      const t1 = toEpoch(electricalHistory[i].timestamp);
+      const dtHours = (t1 - t0) / 3600000; // ms → hours
+      if (dtHours > 0 && dtHours < 1) { // skip gaps > 1 hour
+        totalKwh += ((p0 + p1) / 2) * dtHours;
+      }
+    }
+    return Math.abs(totalKwh);
+  }, [electricalHistory]);
 
   return (
     <HistoryContext.Provider value={{
@@ -191,7 +232,8 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
       mechanicalHistory,
       electricalHistory,
       latestHistoricalFeatures,
-      isFetching
+      isFetching,
+      periodEnergy
     }}>
       {children}
     </HistoryContext.Provider>

@@ -180,63 +180,87 @@ class Database:
     # ── Query Operations ───────────────────────────────────────────────────
     
     def get_readings(self, machine_id: str = "Machine_5",
-                     minutes: int = 10, limit: int = 2000) -> List[Dict]:
+                     minutes: int = 10, limit: int = 2000,
+                     start_time: Optional[str] = None, end_time: Optional[str] = None) -> List[Dict]:
         """Get recent sensor readings with adaptive sampling."""
-        since = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat()
-        
-        # Simple sampling: if window > 30 mins, take every Nth row
-        nth = 1
-        if minutes > 30:
-            nth = max(1, (minutes * 60) // 1000)
+        if start_time and end_time:
+            since = start_time
+            until = end_time
+            try:
+                st = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+                et = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+                diff_mins = (et - st).total_seconds() / 60
+                nth = max(1, int((diff_mins * 60) // 1000)) if diff_mins > 30 else 1
+            except ValueError:
+                nth = 1
+        else:
+            until = datetime.utcnow().isoformat()
+            since = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat()
+            nth = max(1, (minutes * 60) // 1000) if minutes > 30 else 1
             
         with self._get_conn() as conn:
-            # We use a subquery to apply sampling via ROW_NUMBER
             query = f"""
                 SELECT * FROM (
                     SELECT *, ROW_NUMBER() OVER (ORDER BY timestamp DESC) as rn 
                     FROM sensor_readings 
-                    WHERE machine_id = ? AND timestamp > ?
+                    WHERE machine_id = ? AND timestamp >= ? AND timestamp <= ?
                 ) WHERE rn % ? = 0
                 ORDER BY timestamp DESC LIMIT ?
             """
-            rows = conn.execute(query, (machine_id, since, nth, limit)).fetchall()
+            rows = conn.execute(query, (machine_id, since, until, nth, limit)).fetchall()
         return [dict(r) for r in rows]
     
     def get_features(self, machine_id: str = "Machine_5",
-                     minutes: int = 10, limit: int = 2000) -> List[Dict]:
+                     minutes: int = 10, limit: int = 2000,
+                     start_time: Optional[str] = None, end_time: Optional[str] = None) -> List[Dict]:
         """Get recent computed features with adaptive sampling."""
-        since = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat()
-        
-        # Simple sampling: if window > 30 mins, take every Nth row
-        nth = 1
-        if minutes > 30:
-            nth = max(1, (minutes * 6) // 100) # Since features usually every 10s
+        if start_time and end_time:
+            since = start_time
+            until = end_time
+            try:
+                st = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+                et = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+                diff_mins = (et - st).total_seconds() / 60
+                nth = max(1, int((diff_mins * 6) // 100)) if diff_mins > 30 else 1
+            except ValueError:
+                nth = 1
+        else:
+            until = datetime.utcnow().isoformat()
+            since = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat()
+            nth = max(1, (minutes * 6) // 100) if minutes > 30 else 1
             
         with self._get_conn() as conn:
             query = f"""
                 SELECT * FROM (
                     SELECT *, ROW_NUMBER() OVER (ORDER BY timestamp DESC) as rn 
                     FROM features 
-                    WHERE machine_id = ? AND timestamp > ?
+                    WHERE machine_id = ? AND timestamp >= ? AND timestamp <= ?
                 ) WHERE rn % ? = 0
                 ORDER BY timestamp DESC LIMIT ?
             """
-            rows = conn.execute(query, (machine_id, since, nth, limit)).fetchall()
+            rows = conn.execute(query, (machine_id, since, until, nth, limit)).fetchall()
         return [
             {**dict(r), "feature_data": json.loads(r["feature_data"])}
             for r in rows
         ]
     
     def get_alerts(self, machine_id: str = "Machine_5",
-                   minutes: int = 60, limit: int = 50) -> List[Dict]:
+                   minutes: int = 60, limit: int = 50,
+                   start_time: Optional[str] = None, end_time: Optional[str] = None) -> List[Dict]:
         """Get recent alerts."""
-        since = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat()
+        if start_time and end_time:
+            since = start_time
+            until = end_time
+        else:
+            until = datetime.utcnow().isoformat()
+            since = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat()
+            
         with self._get_conn() as conn:
             rows = conn.execute("""
                 SELECT * FROM alerts 
-                WHERE machine_id = ? AND timestamp > ?
+                WHERE machine_id = ? AND timestamp >= ? AND timestamp <= ?
                 ORDER BY timestamp DESC LIMIT ?
-            """, (machine_id, since, limit)).fetchall()
+            """, (machine_id, since, until, limit)).fetchall()
         return [dict(r) for r in rows]
     
     def get_diagnoses(self, machine_id: str = "Machine_5",
