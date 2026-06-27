@@ -115,15 +115,25 @@ class OpenAIClient:
             latest_features = db.get_features(resolved_id, minutes=1)
             recent_alerts = db.get_alerts(resolved_id, minutes=30)
             
+            # 2b. Get static motor configuration for the ACTIVE machine
+            motor_config = db.get_motor_config(resolved_id)
+            if motor_config:
+                config_lines = "\n".join(f"  {k}: {v}" for k, v in motor_config.items() if v)
+                motor_config_block = f"SELECTED ASSET — CONFIGURATION PROFILE:\n{config_lines}"
+            else:
+                motor_config_block = "SELECTED ASSET — CONFIGURATION PROFILE:\n  No configuration profile has been saved for this device yet."
+            
             # 3. Get cross-unit summary for ALL machines
             cross_unit_lines = []
             active_machines = db.get_active_machines(minutes=30)
             for mid in active_machines:
                 reading = db.get_latest_reading(mid)
                 alerts = db.get_alerts(mid, minutes=30, limit=5)
+                mid_config = db.get_motor_config(mid)
+                config_label = mid_config.get('motorName', mid) if mid_config else mid
                 if reading:
                     cross_unit_lines.append(
-                        f"  - Device {mid} ({mid}): "
+                        f"  - Device {mid} ({config_label}): "
                         f"V={reading.get('voltage','?')}V, I={reading.get('current','?')}A, "
                         f"P={reading.get('active_power','?')}kW, PF={reading.get('power_factor','?')}, "
                         f"Temp={reading.get('temperature','?')}°C, "
@@ -131,7 +141,7 @@ class OpenAIClient:
                         f"Recent alerts: {len(alerts)}"
                     )
                 else:
-                    cross_unit_lines.append(f"  - Device {mid} ({mid}): No data yet")
+                    cross_unit_lines.append(f"  - Device {mid} ({config_label}): No data yet")
             
             cross_unit_summary = "\n".join(cross_unit_lines)
             
@@ -139,13 +149,16 @@ class OpenAIClient:
             system_prompt = f"""You are the Elicius AI Maintenance Copilot.
 You are assisting an industrial engineer with predictive maintenance.
 The currently selected asset is: Device {resolved_id} ({resolved_id}).
-Use the real-time telemetry below AND the RAG knowledge base to answer accurately.
+Use the real-time telemetry, the device's configuration profile, AND the RAG knowledge base to answer accurately.
 Focus on ROI, technical reliability, and specific maintenance recommendations.
+When asked about the device's specifications (duty cycle, motor type, rated power, manufacturer, etc.), use the CONFIGURATION PROFILE data.
 When asked about comparisons across machines, use the FLEET OVERVIEW data.
 
 CRITICAL FORMATTING INSTRUCTIONS:
 1. NEVER use emojis, unicode symbols, or icons (e.g. ✅, ⚠️).
 2. ONLY use standard markdown asterisks for formatting (e.g., **bold**).
+
+{motor_config_block}
 
 SELECTED ASSET — REAL-TIME DATA:
   Latest Reading: {latest_reading}
