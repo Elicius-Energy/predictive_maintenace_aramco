@@ -44,7 +44,7 @@ async def chat_with_ai(
     # We apply the limit manually here because standard decorator syntax 
     # has issues with router mounting in FastAPI sometimes.
     @limiter.limit(request.app.state.settings.RAG_CHAT_RATE_LIMIT if hasattr(request.app.state, 'settings') else "10/minute")
-    async def _handle_chat(req: Request):
+    async def _handle_chat(request: Request):
         history_dicts = [{"role": m.role, "content": m.content} for m in chat_request.history]
         response = await ai_client.chat(
             user_message=chat_request.message,
