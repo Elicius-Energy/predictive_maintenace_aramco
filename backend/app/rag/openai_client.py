@@ -123,6 +123,42 @@ class OpenAIClient:
             else:
                 motor_config_block = "SELECTED ASSET — CONFIGURATION PROFILE:\n  No configuration profile has been saved for this device yet."
             
+            # 2c. Compute 24-hour historical duty cycle profile
+            readings_24h = db.get_readings(resolved_id, minutes=24*60, limit=5000)
+            if readings_24h:
+                total_samples = len(readings_24h)
+                readings_chrono = sorted(readings_24h, key=lambda x: x["timestamp"])
+                
+                running_samples = []
+                cycles_count = 0
+                is_running = False
+                
+                for r in readings_chrono:
+                    p = r.get("active_power", 0)
+                    if p is None: p = 0
+                    if p > 0.05: # > 50W threshold for "running" state
+                        running_samples.append(p)
+                        if not is_running:
+                            cycles_count += 1
+                            is_running = True
+                    else:
+                        is_running = False
+                
+                uptime_pct = (len(running_samples) / total_samples) * 100 if total_samples > 0 else 0
+                avg_power = sum(running_samples) / len(running_samples) if running_samples else 0
+                max_power = max(running_samples) if running_samples else 0
+                
+                duty_cycle_block = (
+                    "SELECTED ASSET — 24-HOUR HISTORICAL PROFILE:\n"
+                    f"  - Data points analyzed: {total_samples} (past 24h)\n"
+                    f"  - Estimated Uptime: {uptime_pct:.1f}%\n"
+                    f"  - Start/Stop Cycles: {cycles_count}\n"
+                    f"  - Avg Active Power (when running): {avg_power:.2f} kW\n"
+                    f"  - Max Active Power observed: {max_power:.2f} kW"
+                )
+            else:
+                duty_cycle_block = "SELECTED ASSET — 24-HOUR HISTORICAL PROFILE:\n  No historical data available for the past 24 hours."
+            
             # 3. Get cross-unit summary for ALL machines
             cross_unit_lines = []
             active_machines = db.get_active_machines(minutes=30)
@@ -167,6 +203,8 @@ You are an expert in:
 Device ID: {resolved_id}
 
 {motor_config_block}
+
+{duty_cycle_block}
 
 ## REAL-TIME TELEMETRY
 
