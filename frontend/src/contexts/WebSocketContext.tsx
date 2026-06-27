@@ -2,6 +2,8 @@ import { createContext, useContext, useEffect, useRef, useState, useCallback } f
 import type { ReactNode, FC } from 'react';
 import { WS_URL } from '../utils/constants';
 import type { WSMessage } from '../types';
+import { getAccessToken } from '../utils/api';
+import { useAuth } from './AuthContext';
 
 type MessageListener = (msg: WSMessage) => void;
 
@@ -17,6 +19,7 @@ export const WebSocketProvider: FC<{ children: ReactNode }> = ({ children }) => 
   const socketRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const listenersRef = useRef<Set<MessageListener>>(new Set());
+  const { isAuthenticated } = useAuth();
 
   const subscribe = useCallback((listener: MessageListener) => {
     listenersRef.current.add(listener);
@@ -26,10 +29,17 @@ export const WebSocketProvider: FC<{ children: ReactNode }> = ({ children }) => 
   }, []);
 
   const connect = useCallback(() => {
+    // Only connect if authenticated
+    if (!isAuthenticated) return;
+    
     if (socketRef.current?.readyState === WebSocket.OPEN) return;
 
     try {
-      const ws = new WebSocket(WS_URL);
+      const token = getAccessToken();
+      // Add token query parameter for authentication
+      const wsUrl = token ? `${WS_URL}?token=${token}` : WS_URL;
+      
+      const ws = new WebSocket(wsUrl);
       socketRef.current = ws;
 
       ws.onopen = () => {
@@ -48,16 +58,21 @@ export const WebSocketProvider: FC<{ children: ReactNode }> = ({ children }) => 
 
       ws.onclose = () => {
         setIsConnected(false);
-        reconnectTimeoutRef.current = window.setTimeout(connect, 5000);
+        // Only attempt reconnect if still authenticated
+        if (getAccessToken()) {
+          reconnectTimeoutRef.current = window.setTimeout(connect, 5000);
+        }
       };
 
       ws.onerror = () => {
         ws.close();
       };
     } catch {
-      reconnectTimeoutRef.current = window.setTimeout(connect, 5000);
+      if (getAccessToken()) {
+        reconnectTimeoutRef.current = window.setTimeout(connect, 5000);
+      }
     }
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     connect();
@@ -65,7 +80,7 @@ export const WebSocketProvider: FC<{ children: ReactNode }> = ({ children }) => 
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
       socketRef.current?.close();
     };
-  }, [connect]);
+  }, [connect, isAuthenticated]);
 
   return (
     <WebSocketContext.Provider value={{ subscribe, isConnected }}>

@@ -57,21 +57,21 @@ export const FORMULAS = {
   ],
   electricalEfficiency: [
     {
-      name: 'Theoretical Apparent Power',
-      expression: 'P_theoretical = V * I * sqrt(3)',
-      explanation: 'Three-phase apparent power estimate used when assessing efficiency.'
+      name: 'Manufacturer-Curve Efficiency (PCHIP)',
+      expression: 'η(P_in) = PCHIP_interpolation(P_in ; test_report_points)',
+      explanation: 'Efficiency is estimated by PCHIP interpolation of the manufacturer test report\'s 6 tested η vs P_in points for the 5.5 kW, 415 V, 4-pole motor. Clamped at calibration boundaries (1742–8265 W).'
     },
     {
-      name: 'Efficiency',
-      expression: 'Efficiency(%) = clamp((P_active / P_theoretical) * 100, 0, 100)',
-      explanation: 'Current frontend and backend efficiency display follows this simplified model.'
+      name: 'Output Shaft Power',
+      expression: 'P_out = P_in × η / 100',
+      explanation: 'Estimated mechanical output power derived from real input power and the interpolated efficiency.'
     }
   ],
   load: [
     {
       name: 'Load Percentage',
-      expression: 'Load(%) = (P_active / 10.0) * 100',
-      explanation: 'Assumes a nominal 10 kW machine rating in the existing feature extractor.'
+      expression: 'Load(%) = (P_out / 5500) × 100',
+      explanation: 'Load relative to the rated mechanical output of 5500 W (5.5 kW).'
     },
     {
       name: 'Power Factor',

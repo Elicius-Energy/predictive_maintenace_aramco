@@ -32,19 +32,19 @@ const Topbar: FC = () => {
   const healthScore = latestHealth?.health_score || activeMachine?.health_score || 0;
 
   return (
-    <header className="h-16 border-b border-border bg-surface flex items-center justify-between px-6 z-40 shadow-sm">
+    <header className="min-h-[4rem] py-2 border-b border-border bg-surface flex flex-wrap items-center justify-between px-4 lg:px-6 z-40 shadow-sm gap-y-3">
       {/* breadcrumbs / machine selector */}
-      <div className="flex items-center gap-6">
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-muted rounded-lg border border-border">
+      <div className="flex items-center gap-3 lg:gap-6 flex-wrap">
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-muted rounded-lg border border-border shrink-0">
           <MapPin size={14} className="text-secondary" />
           <span className="text-sm font-medium text-text-secondary">
             {activeMachine ? `${activeMachine.plant} / ${activeMachine.unit}` : 'Select Plant'}
           </span>
         </div>
 
-        <div className="h-6 w-px bg-border" />
+        <div className="h-6 w-px bg-border hidden sm:block" />
 
-        <div className="relative group min-w-[180px]">
+        <div className="relative group min-w-[140px] md:min-w-[180px] shrink-0">
           <select 
             value={activeMachine?.machine_id || ''} 
             onChange={(e) => {
@@ -62,12 +62,12 @@ const Topbar: FC = () => {
           <ChevronDown size={14} className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-primary" />
         </div>
 
-        <div className="h-6 w-px bg-border" />
+        <div className="h-6 w-px bg-border hidden sm:block" />
 
         {/* Datetime Range Selector */}
-        <div className="flex items-center gap-3 bg-surface-muted p-1.5 rounded-lg border border-border">
+        <div className="flex items-center gap-2 lg:gap-3 bg-surface-muted p-1.5 rounded-lg border border-border shrink-0">
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-text-muted font-bold uppercase tracking-wider">Start</span>
+            <span className="text-[10px] text-text-muted font-bold uppercase tracking-wider hidden sm:inline">Start</span>
             <input 
               type="datetime-local" 
               value={timeRange.start}
@@ -77,7 +77,7 @@ const Topbar: FC = () => {
           </div>
           <div className="w-px h-4 bg-border" />
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-text-muted font-bold uppercase tracking-wider">End</span>
+            <span className="text-[10px] text-text-muted font-bold uppercase tracking-wider hidden sm:inline">End</span>
             <input 
               type="datetime-local" 
               value={timeRange.end}
@@ -89,7 +89,7 @@ const Topbar: FC = () => {
       </div>
 
       {/* Global Status indicators */}
-      <div className="flex items-center gap-8">
+      <div className="flex items-center gap-4 lg:gap-8 flex-wrap shrink-0">
         {/* Connection Status */}
         <div className="flex items-center gap-2">
           {isConnected ? (

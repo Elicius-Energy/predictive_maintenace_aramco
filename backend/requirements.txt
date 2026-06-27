@@ -17,12 +17,19 @@ scipy==1.15.0
 
 # ML
 scikit-learn==1.6.1
+joblib==1.4.2
 
 # RAG / AI
-openai>=1.0.0
+openai==1.59.3
 faiss-cpu==1.9.0.post1
 sentence-transformers==3.3.1
 pypdf==5.1.0
+
+# Auth & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+slowapi==0.1.9
+bcrypt==4.2.1
 
 # Utilities
 python-dotenv==1.0.1

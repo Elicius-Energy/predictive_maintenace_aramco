@@ -7,7 +7,7 @@ import logging
 import time
 import uuid
 from typing import Callable, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 
@@ -92,7 +92,7 @@ class MQTTClient:
             # Build combined reading when we have at least one type of data
             if machine_id in self.last_energy_data or machine_id in self.last_accel_data:
                 reading = SensorReading(
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     machine_id=machine_id,
                     source=DataSource.MQTT,
                     energy=self.last_energy_data.get(machine_id),
@@ -136,7 +136,7 @@ class MQTTClient:
             self.last_energy_data[machine_id] = compat_energy
 
             # Convert device epoch timestamp → datetime
-            ts = datetime.utcfromtimestamp(three_phase.dTS) if three_phase.dTS > 0 else datetime.utcnow()
+            ts = datetime.fromtimestamp(three_phase.dTS, tz=timezone.utc) if three_phase.dTS > 0 else datetime.now(timezone.utc)
 
             reading = SensorReading(
                 timestamp=ts,
@@ -163,7 +163,11 @@ class MQTTClient:
         self._running = True
         
         client_id = f"{settings.MQTT_CLIENT_ID}_{uuid.uuid4().hex[:8]}"
-        self.client = mqtt.Client(client_id=client_id)
+        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id=client_id)
+        
+        if settings.MQTT_USERNAME and settings.MQTT_PASSWORD:
+            self.client.username_pw_set(settings.MQTT_USERNAME, settings.MQTT_PASSWORD)
+            
         self.client.on_connect = self._on_connect
         self.client.on_disconnect = self._on_disconnect
         self.client.on_message = self._on_message

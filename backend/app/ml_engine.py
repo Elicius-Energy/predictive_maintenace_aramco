@@ -4,9 +4,10 @@ ML Layer for anomaly detection using Isolation Forest.
 import logging
 import numpy as np
 from sklearn.ensemble import IsolationForest
-import pickle
+import joblib
 import os
-from datetime import datetime
+import hashlib
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from app.models import FeatureVector
@@ -56,15 +57,19 @@ class MLEngine:
                 
             return 0.0 # Default to normal during training phase
             
-        feat = self._extract_features(fv)
-        # decision_function returns negative values for anomalies, positive for normal
-        # We transform it to a 0-1 scale where 1 is anomaly
-        score = self.model.decision_function(feat)[0]
-        
-        # Map score (roughly -0.5 to 0.5) to 0-1
-        # Higher score = more normal. Lower score = more anomalous.
-        normalized_anomaly = 1.0 - (score + 0.5) 
-        return float(max(0, min(1.0, normalized_anomaly)))
+        try:
+            feat = self._extract_features(fv)
+            # decision_function returns negative values for anomalies, positive for normal
+            # We transform it to a 0-1 scale where 1 is anomaly
+            score = self.model.decision_function(feat)[0]
+            
+            # Map score (roughly -0.5 to 0.5) to 0-1
+            # Higher score = more normal. Lower score = more anomalous.
+            normalized_anomaly = 1.0 - (score + 0.5) 
+            return float(max(0, min(1.0, normalized_anomaly)))
+        except Exception as e:
+            logger.error(f"Error during ML prediction: {e}")
+            return 0.0
 
     def train(self):
         """Train the model on collected data."""
@@ -82,16 +87,23 @@ class MLEngine:
 
     def _save_model(self):
         try:
-            with open(self.model_path, 'wb') as f:
-                pickle.dump(self.model, f)
+            joblib.dump(self.model, self.model_path)
+            # Compute and log hash of saved model
+            with open(self.model_path, 'rb') as f:
+                model_hash = hashlib.sha256(f.read()).hexdigest()
+            logger.info(f"Model saved. SHA256: {model_hash}")
         except Exception as e:
             logger.error(f"Failed to save model: {e}")
 
     def _load_model(self):
         if os.path.exists(self.model_path):
             try:
+                # Log hash before loading
                 with open(self.model_path, 'rb') as f:
-                    self.model = pickle.load(f)
+                    model_hash = hashlib.sha256(f.read()).hexdigest()
+                logger.info(f"Loading model with SHA256: {model_hash}")
+                
+                self.model = joblib.load(self.model_path)
                 self.is_trained = True
                 logger.info("Loaded anomaly detection model from disk.")
             except Exception as e:

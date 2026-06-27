@@ -5,6 +5,7 @@ Supports TXT and PDF formats with automatic modification detection.
 import os
 import logging
 import pickle
+import threading
 from typing import List, Optional
 import faiss
 from sentence_transformers import SentenceTransformer
@@ -25,6 +26,7 @@ class EmbeddingManager:
         self.index_path = settings.FAISS_INDEX_PATH
         self.knowledge_dir = settings.KNOWLEDGE_BASE_DIR
         self._model_load_failed = False
+        self._init_lock = threading.Lock()
 
     def _ensure_model(self) -> bool:
         """Load embedding model lazily so the backend can still boot offline."""
@@ -44,43 +46,44 @@ class EmbeddingManager:
         
     def initialize(self):
         """Load knowledge base, embed, and build index with modification check."""
-        if not self._ensure_model():
-            logger.warning("Embedding model unavailable. RAG index initialization skipped.")
-            self.index = None
-            self.documents = []
-            return
-
-        index_file = self.index_path + ".index"
-        docs_file = self.index_path + ".docs"
-        
-        rebuild_required = False
-        
-        # 1. Check if index files exist at all
-        if not os.path.exists(index_file) or not os.path.exists(docs_file):
-            rebuild_required = True
-        else:
-            # 2. Smart Rebuild: Check if any knowledge file is newer than the index
-            index_mtime = os.path.getmtime(index_file)
-            kb_path = Path(self.knowledge_dir)
+        with self._init_lock:
+            if not self._ensure_model():
+                logger.warning("Embedding model unavailable. RAG index initialization skipped.")
+                self.index = None
+                self.documents = []
+                return
+    
+            index_file = self.index_path + ".index"
+            docs_file = self.index_path + ".docs"
             
-            if kb_path.exists():
-                # Check both .txt and .pdf
-                for ext in ["*.txt", "*.pdf"]:
-                    for file_path in kb_path.glob(ext):
-                        if file_path.stat().st_mtime > index_mtime:
-                            logger.info(f"Newer file detected: {file_path.name}. Rebuilding index...")
-                            rebuild_required = True
+            rebuild_required = False
+            
+            # 1. Check if index files exist at all
+            if not os.path.exists(index_file) or not os.path.exists(docs_file):
+                rebuild_required = True
+            else:
+                # 2. Smart Rebuild: Check if any knowledge file is newer than the index
+                index_mtime = os.path.getmtime(index_file)
+                kb_path = Path(self.knowledge_dir)
+                
+                if kb_path.exists():
+                    # Check both .txt and .pdf
+                    for ext in ["*.txt", "*.pdf"]:
+                        for file_path in kb_path.glob(ext):
+                            if file_path.stat().st_mtime > index_mtime:
+                                logger.info(f"Newer file detected: {file_path.name}. Rebuilding index...")
+                                rebuild_required = True
+                                break
+                        if rebuild_required:
                             break
-                    if rebuild_required:
-                        break
-        
-        if not rebuild_required:
-            self.load_index()
-            return
-
-        logger.info("Initializing/Rebuilding FAISS index from knowledge base...")
-        self._build_index()
-        self.save_index()
+            
+            if not rebuild_required:
+                self.load_index()
+                return
+    
+            logger.info("Initializing/Rebuilding FAISS index from knowledge base...")
+            self._build_index()
+            self.save_index()
 
     def _build_index(self):
         """Read text and PDF files, chunk them, and create FAISS index."""
@@ -166,8 +169,16 @@ class EmbeddingManager:
         try:
             self.index = faiss.read_index(self.index_path + ".index")
             with open(self.index_path + ".docs", 'rb') as f:
-                self.documents = pickle.load(f)
-            logger.info(f"Loaded existing FAISS index with {len(self.documents)} docs.")
+                loaded_docs = pickle.load(f)
+                
+            # Safety check to ensure we loaded a list of strings
+            if isinstance(loaded_docs, list) and all(isinstance(d, str) for d in loaded_docs):
+                self.documents = loaded_docs
+                logger.info(f"Loaded existing FAISS index with {len(self.documents)} docs.")
+            else:
+                logger.error("Loaded docs are not a valid list of strings. Rebuilding.")
+                self._build_index()
+                
         except Exception as e:
             logger.warning(f"Failed to load index, will build new one: {e}")
             self._build_index()

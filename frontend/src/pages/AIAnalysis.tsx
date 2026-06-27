@@ -7,7 +7,7 @@ import { useChat } from '../contexts/ChatContext';
 import { useSensorData } from '../hooks/useSensorData';
 import FormulaPanel from '../components/common/FormulaPanel';
 import { FORMULAS } from '../data/formulas';
-import { BACKEND_URL } from '../utils/constants';
+import api from '../utils/api';
 import { useReactToPrint } from 'react-to-print';
 import { PdfReportTemplate } from '../components/report/PdfReportTemplate';
 import { useHistory } from '../contexts/HistoryContext';
@@ -148,28 +148,64 @@ const AIAnalysis: FC = () => {
     setIsTyping(true);
 
     try {
-      const response = await fetch(`${BACKEND_URL}/api/rag/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: userMsg,
-          machine_id: activeMachine?.machine_id || 'sim-pump-001',
-          history: currentHistory
-        })
+      const response = await api.post('/api/rag/chat', {
+        message: userMsg,
+        machine_id: activeMachine?.machine_id || 'sim-pump-001',
+        history: currentHistory
       });
 
-      if (!response.ok) throw new Error('Failed to reach AI Backend');
-
-      const data = await response.json();
-      setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
-    } catch (err) {
+      setMessages(prev => [...prev, { role: 'assistant', content: response.data.response }]);
+    } catch (err: any) {
       console.error('Chat Error:', err);
+      let errorMsg = 'I managed to encounter an error connecting to the AI server. Please ensure the backend is running with a valid OpenAI API key.';
+      if (err.response && err.response.status === 429) {
+        errorMsg = 'Rate limit exceeded. Please wait a moment before sending another message.';
+      } else if (err.response && err.response.status === 401) {
+        errorMsg = 'Session expired. Please log in again.';
+      }
+      
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: 'I managed to encounter an error connecting to the AI server. Please ensure the backend is running with a valid Anthropic API key.'
+        content: errorMsg
       }]);
     } finally {
       setIsTyping(false);
+    }
+  };
+
+  const handleDownloadCSV = async () => {
+    try {
+      const response = await api.get('/api/data/download_csv', {
+        params: {
+          machine_id: activeId,
+          start_time: new Date(timeRange.start).toISOString(),
+          end_time: new Date(timeRange.end).toISOString()
+        },
+        responseType: 'blob', // Important for file downloads
+      });
+      
+      // Create a blob link to download
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Extract filename from Content-Disposition header if possible
+      let filename = `export_${activeId}.csv`;
+      const contentDisposition = response.headers['content-disposition'];
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (filenameMatch && filenameMatch.length === 2) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode?.removeChild(link);
+    } catch (err) {
+      console.error('Failed to download CSV:', err);
+      alert('Failed to download CSV. Please try again.');
     }
   };
 
@@ -182,7 +218,7 @@ const AIAnalysis: FC = () => {
         </div>
         <div className="flex items-center gap-4">
           <button
-            onClick={() => window.open(`${BACKEND_URL}/api/data/download_csv?machine_id=${activeId}&start_time=${new Date(timeRange.start).toISOString()}&end_time=${new Date(timeRange.end).toISOString()}`)}
+            onClick={handleDownloadCSV}
             className="flex items-center gap-2 px-3 py-1.5 bg-surface-muted hover:bg-surface border border-border rounded-lg text-xs font-bold text-text-primary transition-colors cursor-pointer"
           >
             <Download size={14} />

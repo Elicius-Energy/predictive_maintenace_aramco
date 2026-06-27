@@ -1,13 +1,16 @@
 import { useState, useMemo } from 'react';
 import type { FC } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useSensorData } from '../hooks/useSensorData';
 import { useHistory } from '../contexts/HistoryContext';
 import { useMotorDetails } from '../contexts/MotorDetailsContext';
+import MotorDetailsForm from './MotorDetailsForm';
 import TimeSeriesChart from '../components/charts/TimeSeriesChart';
 import GaugeChart from '../components/charts/GaugeChart';
 import PhasorDiagram from '../components/charts/PhasorDiagram';
 import PowerTriangle from '../components/charts/PowerTriangle';
-import { Zap, WifiOff, Gauge, BarChart3, Activity, Bolt, ArrowUpDown, TrendingUp, AlertTriangle, DollarSign, Target } from 'lucide-react';
+import { estimateMotorEfficiency } from '../data/motorEfficiency';
+import { Zap, WifiOff, Gauge, BarChart3, Activity, Bolt, ArrowUpDown, TrendingUp, AlertTriangle, DollarSign, Target, ShieldAlert, Info } from 'lucide-react';
 
 /* ──────────────── tiny helper ──────────────── */
 const fmt = (v?: number, d = 2) => (v ?? 0).toFixed(d);
@@ -24,9 +27,21 @@ const PhaseBadge: FC<{ phase: string; color: string }> = ({ phase, color }) => (
 
 /* ──────────────── MAIN PAGE ──────────────── */
 const ElectricalParams: FC = () => {
+  const navigate = useNavigate();
   const { latestFeatures, isConnected } = useSensorData();
   const { electricalHistory, latestHistoricalFeatures, periodEnergy } = useHistory();
-  const { motorDetails, isMotorConfigured } = useMotorDetails();
+  const { motorDetails, resetMotorDetails } = useMotorDetails();
+
+  const handleResetConfig = async () => {
+    if (window.confirm("Are you sure you want to clear the saved motor configuration?")) {
+      try {
+        await resetMotorDetails();
+        navigate('/machines');
+      } catch (e) {
+        alert("Failed to reset configuration.");
+      }
+    }
+  };
 
   const e = latestFeatures?.electrical || latestHistoricalFeatures?.electrical;
   const hasData = e !== undefined && e !== null;
@@ -34,25 +49,40 @@ const ElectricalParams: FC = () => {
   // ── ROI inputs (local state) ──
   const [targetEfficiency, setTargetEfficiency] = useState(95);
   const [annualHours, setAnnualHours] = useState(8000);
+  const [showSetupModal, setShowSetupModal] = useState(false);
 
-  // ── Efficiency Computation ──
+  // ── Efficiency Computation (Manufacturer Curve — PCHIP Interpolation) ──
   const efficiencyCalc = useMemo(() => {
-    if (!isMotorConfigured || !motorDetails || !hasData) return null;
-    const pRated = motorDetails.ratedPower;        // kW
-    const etaRated = motorDetails.ratedEfficiency;  // %
-    const pMeasured = e?.t_kw ?? e?.active_power ?? 0; // kW (total 3-phase active power)
+    if (!hasData) return null;
+    const pMeasuredKW = e?.t_kw ?? e?.active_power ?? 0; // kW (electrical input)
+    const pMeasuredW = pMeasuredKW * 1000;                // convert to watts
 
-    if (pMeasured <= 0 || pRated <= 0 || etaRated <= 0) return null;
+    if (pMeasuredW <= 0) return null;
 
-    // Theoretical input power at rated conditions = P_rated / (η_rated / 100)
-    const theoreticalInput = pRated / (etaRated / 100);
-    // Actual efficiency = (P_rated / P_measured) × 100
-    const etaActual = Math.min(100, (pRated / pMeasured) * 100);
-    // Gap
-    const gap = etaRated - etaActual;
+    const result = estimateMotorEfficiency(pMeasuredW, {
+      voltage: e?.vll_avg ?? e?.voltage,
+      current: e?.i_avg ?? e?.current,
+      pf: e?.pf_avg ?? e?.power_factor,
+      frequency: e?.frequency,
+    });
 
-    return { etaRated, etaActual, gap, pMeasured, theoreticalInput };
-  }, [isMotorConfigured, motorDetails, e]);
+    // η at rated load point (≈98 % load → 85.33 % from manufacturer curve)
+    const etaRatedResult = estimateMotorEfficiency(6431); // rated ~98 % load point
+    const etaRated = etaRatedResult.efficiencyPct;
+    const gap = etaRated - result.efficiencyPct;
+
+    return {
+      etaRated,
+      etaActual: result.efficiencyPct,
+      gap,
+      pMeasured: pMeasuredKW,
+      pMeasuredW,
+      pOutW: result.outputPowerW,
+      loadPct: result.loadPct,
+      extrapolated: result.extrapolated,
+      validationFlags: result.validationFlags,
+    };
+  }, [e, hasData]);
 
   // ── ROI Computation ──
   const roiCalc = useMemo(() => {
@@ -149,6 +179,78 @@ const ElectricalParams: FC = () => {
           <div className="mt-auto pt-3 border-t border-border flex items-center justify-between bg-surface/60 px-3 py-2 rounded-lg">
             <span className="text-xs font-bold text-text-muted flex items-center gap-1"><Activity size={12}/> Freq</span>
             <span className="text-lg font-mono font-extrabold text-emerald-600">{fmt(e?.frequency, 2)}<span className="text-[10px] ml-0.5">Hz</span></span>
+          </div>
+        </div>
+      </div>
+
+      {/* ═══════════════ ROW 4 — Power Factor Gauges ═══════════════ */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
+        {[
+          { label: 'PF L1', val: e?.pf1, color: '#ef4444' },
+          { label: 'PF L2', val: e?.pf2, color: '#f59e0b' },
+          { label: 'PF L3', val: e?.pf3, color: '#3b82f6' },
+          { label: 'PF Avg', val: e?.pf_avg, color: '#0891b2' },
+        ].map(p => (
+          <div key={p.label} className="industrial-card p-5 flex flex-col items-center" style={{ borderTop: `4px solid ${p.color}` }}>
+            <GaugeChart value={p.val ?? 1} min={0} max={1.05} unit="cos φ" label={p.label} thresholds={{ warning: 0.85, critical: 0.7 }} />
+          </div>
+        ))}
+      </div>
+
+      {/* ═══════════════ ROW 5 — Time Series (Line Plots) ═══════════════ */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="industrial-card p-5">
+          <div className="h-[320px]">
+            <TimeSeriesChart
+              data={electricalHistory}
+              title="3-Phase L-L Voltage Trend (V)"
+              yDomain={[0, 500]}
+              lines={[
+                { key: 'v12', color: '#ef4444', name: 'L1-L2 Voltage' },
+                { key: 'v23', color: '#f59e0b', name: 'L2-L3 Voltage' },
+                { key: 'v31', color: '#3b82f6', name: 'L3-L1 Voltage' },
+              ]}
+            />
+          </div>
+        </div>
+        <div className="industrial-card p-5">
+          <div className="h-[320px]">
+            <TimeSeriesChart
+              data={electricalHistory}
+              title="3-Phase Current Pattern (A)"
+              lines={[
+                { key: 'i1', color: '#ef4444', name: 'L1 Current' },
+                { key: 'i2', color: '#f59e0b', name: 'L2 Current' },
+                { key: 'i3', color: '#3b82f6', name: 'L3 Current' },
+              ]}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="industrial-card p-5">
+          <div className="h-[300px]">
+            <TimeSeriesChart
+              data={electricalHistory}
+              title="Active Power per Phase (kW)"
+              lines={[
+                { key: 'kw1', color: '#ef4444', name: 'L1 kW' },
+                { key: 'kw2', color: '#f59e0b', name: 'L2 kW' },
+                { key: 'kw3', color: '#3b82f6', name: 'L3 kW' },
+              ]}
+            />
+          </div>
+        </div>
+        <div className="industrial-card p-5">
+          <div className="h-[300px]">
+            <TimeSeriesChart
+              data={electricalHistory}
+              title="Power Factor Trend (cos φ)"
+              lines={[
+                { key: 'pf', color: '#10b981', name: 'Avg PF' },
+              ]}
+            />
           </div>
         </div>
       </div>
@@ -265,71 +367,175 @@ const ElectricalParams: FC = () => {
         </div>
       </div>
 
-      {/* ═══════════════ EFFICIENCY ANALYSIS ═══════════════ */}
-      {isMotorConfigured && efficiencyCalc && (
-        <div className="industrial-card p-6 border-l-4 border-l-cyan-500 bg-gradient-to-br from-surface to-cyan-50/20">
-          <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider mb-5 flex items-center gap-2">
-            <TrendingUp className="text-primary" size={18} />
-            Motor Efficiency Analysis
+      {/* ═══════════════ ROW 3 — Per-Phase Power Table ═══════════════ */}
+      <div className="industrial-card overflow-hidden">
+        <div className="px-5 pt-5 pb-3">
+          <h3 className="text-xs uppercase font-extrabold tracking-wider text-text-muted flex items-center gap-1.5">
+            <BarChart3 size={14}/> Per-Phase Power Breakdown
           </h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gradient-to-r from-slate-50 to-cyan-50/40 text-text-secondary">
+                <th className="text-left px-5 py-3 text-xs font-extrabold uppercase tracking-wider">Phase</th>
+                <th className="text-right px-5 py-3 text-xs font-extrabold uppercase tracking-wider">Voltage (V)</th>
+                <th className="text-right px-5 py-3 text-xs font-extrabold uppercase tracking-wider">Current (A)</th>
+                <th className="text-right px-5 py-3 text-xs font-extrabold uppercase tracking-wider">kW</th>
+                <th className="text-right px-5 py-3 text-xs font-extrabold uppercase tracking-wider">kVAR</th>
+                <th className="text-right px-5 py-3 text-xs font-extrabold uppercase tracking-wider">kVA</th>
+                <th className="text-right px-5 py-3 text-xs font-extrabold uppercase tracking-wider">PF</th>
+              </tr>
+            </thead>
+            <tbody className="font-mono">
+              {[
+                { phase: 'L1', color: '#ef4444', bg: 'bg-red-50/40', v: e?.v1n, i: e?.i1, kw: e?.kw1, kvar: e?.kvar1, kva: e?.kva1, pf: e?.pf1 },
+                { phase: 'L2', color: '#f59e0b', bg: 'bg-amber-50/40', v: e?.v2n, i: e?.i2, kw: e?.kw2, kvar: e?.kvar2, kva: e?.kva2, pf: e?.pf2 },
+                { phase: 'L3', color: '#3b82f6', bg: 'bg-blue-50/40', v: e?.v3n, i: e?.i3, kw: e?.kw3, kvar: e?.kvar3, kva: e?.kva3, pf: e?.pf3 },
+              ].map(row => (
+                <tr key={row.phase} className={`${row.bg} border-t border-border/50 hover:bg-surface-muted transition-colors`}>
+                  <td className="px-5 py-3">
+                    <PhaseBadge phase={row.phase} color={row.color} />
+                  </td>
+                  <td className="text-right px-5 py-3 font-bold">{fmt(row.v, 1)}</td>
+                  <td className="text-right px-5 py-3 font-bold">{fmt(row.i, 2)}</td>
+                  <td className="text-right px-5 py-3 font-bold text-emerald-600">{fmt(row.kw, 2)}</td>
+                  <td className="text-right px-5 py-3 font-bold text-amber-600">{fmt(row.kvar, 2)}</td>
+                  <td className="text-right px-5 py-3 font-bold text-violet-600">{fmt(row.kva, 2)}</td>
+                  <td className="text-right px-5 py-3 font-bold">{fmt(row.pf, 3)}</td>
+                </tr>
+              ))}
+              {/* Totals row */}
+              <tr className="bg-gradient-to-r from-cyan-50/50 to-violet-50/50 border-t-2 border-primary/20 font-extrabold">
+                <td className="px-5 py-3 text-xs uppercase tracking-wider text-text-secondary">Total / Avg</td>
+                <td className="text-right px-5 py-3">{fmt(e?.vln_avg, 1)}</td>
+                <td className="text-right px-5 py-3">{fmt(e?.i_avg, 2)}</td>
+                <td className="text-right px-5 py-3 text-emerald-700">{fmt(e?.t_kw, 2)}</td>
+                <td className="text-right px-5 py-3 text-amber-700">{fmt(e?.t_kvar, 2)}</td>
+                <td className="text-right px-5 py-3 text-violet-700">{fmt(e?.t_kva, 2)}</td>
+                <td className="text-right px-5 py-3">{fmt(e?.pf_avg, 3)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-4">
+      {/* ═══════════════ EFFICIENCY ANALYSIS ═══════════════ */}
+      {efficiencyCalc && (
+        <div className="industrial-card p-6 border-l-4 border-l-cyan-500 bg-gradient-to-br from-surface to-cyan-50/20">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider flex items-center gap-2">
+              <TrendingUp className="text-primary" size={18} />
+              Motor Efficiency Analysis
+            </h3>
+            {efficiencyCalc.extrapolated && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-300 text-[10px] font-extrabold text-amber-800 uppercase tracking-wider animate-pulse">
+                <ShieldAlert size={12} />
+                Extrapolated
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
             {/* η rated */}
-            <div className="p-5 rounded-xl bg-gradient-to-br from-emerald-50 to-emerald-100/40 border border-emerald-200/60 text-center">
-              <p className="text-[10px] font-extrabold text-emerald-700 uppercase tracking-wider mb-2">η Rated (Nameplate)</p>
-              <p className="text-3xl font-mono font-extrabold text-emerald-600">{efficiencyCalc.etaRated.toFixed(1)}<span className="text-lg">%</span></p>
+            <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-50 to-emerald-100/40 border border-emerald-200/60 text-center">
+              <p className="text-[10px] font-extrabold text-emerald-700 uppercase tracking-wider mb-2">η Rated (Test Report)</p>
+              <p className="text-2xl font-mono font-extrabold text-emerald-600">{efficiencyCalc.etaRated.toFixed(1)}<span className="text-sm">%</span></p>
             </div>
             {/* η actual */}
-            <div className={`p-5 rounded-xl text-center border ${efficiencyCalc.gap > 5
+            <div className={`p-4 rounded-xl text-center border ${efficiencyCalc.gap > 5
                 ? 'bg-gradient-to-br from-red-50 to-red-100/40 border-red-200/60'
                 : efficiencyCalc.gap > 2
                   ? 'bg-gradient-to-br from-amber-50 to-amber-100/40 border-amber-200/60'
                   : 'bg-gradient-to-br from-cyan-50 to-cyan-100/40 border-cyan-200/60'
               }`}>
-              <p className="text-[10px] font-extrabold text-text-secondary uppercase tracking-wider mb-2">η Actual (Measured)</p>
-              <p className={`text-3xl font-mono font-extrabold ${efficiencyCalc.gap > 5
+              <p className="text-[10px] font-extrabold text-text-secondary uppercase tracking-wider mb-2">η Estimated</p>
+              <p className={`text-2xl font-mono font-extrabold ${efficiencyCalc.gap > 5
                   ? 'text-accent-red'
                   : efficiencyCalc.gap > 2
                     ? 'text-accent-amber'
                     : 'text-primary'
-                }`}>{efficiencyCalc.etaActual.toFixed(1)}<span className="text-lg">%</span></p>
-              <p className="text-xs text-text-muted mt-1 font-mono">P_measured = {efficiencyCalc.pMeasured.toFixed(2)} kW</p>
+                }`}>{efficiencyCalc.etaActual.toFixed(1)}<span className="text-sm">%</span></p>
+              <p className="text-[10px] text-text-muted mt-1 font-mono">P_in = {efficiencyCalc.pMeasured.toFixed(2)} kW</p>
+            </div>
+            {/* P_out */}
+            <div className="p-4 rounded-xl bg-gradient-to-br from-sky-50 to-sky-100/40 border border-sky-200/60 text-center">
+              <p className="text-[10px] font-extrabold text-sky-700 uppercase tracking-wider mb-2">P_out (Shaft)</p>
+              <p className="text-2xl font-mono font-extrabold text-sky-600">{(efficiencyCalc.pOutW / 1000).toFixed(2)}<span className="text-sm"> kW</span></p>
+            </div>
+            {/* Load % */}
+            <div className={`p-4 rounded-xl text-center border ${
+              efficiencyCalc.loadPct > 115
+                ? 'bg-gradient-to-br from-red-50 to-red-100/40 border-red-200/60'
+                : efficiencyCalc.loadPct > 100
+                  ? 'bg-gradient-to-br from-amber-50 to-amber-100/40 border-amber-200/60'
+                  : 'bg-gradient-to-br from-violet-50 to-violet-100/40 border-violet-200/60'
+              }`}>
+              <p className="text-[10px] font-extrabold text-text-secondary uppercase tracking-wider mb-2">Load</p>
+              <p className={`text-2xl font-mono font-extrabold ${
+                efficiencyCalc.loadPct > 115 ? 'text-accent-red'
+                  : efficiencyCalc.loadPct > 100 ? 'text-accent-amber'
+                  : 'text-violet-600'
+                }`}>{efficiencyCalc.loadPct.toFixed(1)}<span className="text-sm">%</span></p>
+              <p className="text-[10px] text-text-muted mt-1 font-mono">of 5.5 kW rated</p>
             </div>
             {/* Δη gap */}
-            <div className={`p-5 rounded-xl text-center border ${efficiencyCalc.gap > 5
+            <div className={`p-4 rounded-xl text-center border ${efficiencyCalc.gap > 5
                 ? 'bg-gradient-to-br from-red-50 to-red-100/40 border-red-200/60'
                 : efficiencyCalc.gap > 2
                   ? 'bg-gradient-to-br from-amber-50 to-amber-100/40 border-amber-200/60'
                   : 'bg-gradient-to-br from-emerald-50 to-emerald-100/40 border-emerald-200/60'
               }`}>
-              <p className="text-[10px] font-extrabold text-text-secondary uppercase tracking-wider mb-2">Δη Efficiency Gap</p>
-              <p className={`text-3xl font-mono font-extrabold ${efficiencyCalc.gap > 5
+              <p className="text-[10px] font-extrabold text-text-secondary uppercase tracking-wider mb-2" title="Difference between rated and estimated efficiency">Δ Efficiency Gap</p>
+              <p className={`text-2xl font-mono font-extrabold ${efficiencyCalc.gap > 5
                   ? 'text-accent-red'
                   : efficiencyCalc.gap > 2
                     ? 'text-accent-amber'
                     : 'text-accent-green'
-                }`}>{efficiencyCalc.gap > 0 ? '+' : ''}{efficiencyCalc.gap.toFixed(1)}<span className="text-lg"> pp</span></p>
+                }`}>{efficiencyCalc.gap > 0 ? '+' : ''}{efficiencyCalc.gap.toFixed(1)}<span className="text-sm"> pp</span></p>
+              <p className="text-[10px] text-text-muted mt-1 font-mono">(Percentage Points)</p>
             </div>
           </div>
 
-          {/* Disclaimer */}
-          <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-            <AlertTriangle size={14} className="text-accent-amber flex-shrink-0 mt-0.5" />
-            <p className="text-[11px] text-amber-800 font-medium leading-relaxed">
-              <strong>Assumption:</strong> Motor is operating at rated load. Actual efficiency = (P_rated / P_input_measured) × 100%.
-              This is a simplified nameplate-based estimate — mechanical/process-side power is not directly measured.
+          {/* Validation flags */}
+          {efficiencyCalc.validationFlags.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-4">
+              {efficiencyCalc.validationFlags.map((flag, i) => (
+                <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-[10px] font-bold text-amber-700">
+                  <AlertTriangle size={10} />
+                  {flag}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Method disclaimer */}
+          <div className="flex items-start gap-2 p-3 bg-cyan-50 border border-cyan-200 rounded-lg">
+            <TrendingUp size={14} className="text-primary flex-shrink-0 mt-0.5" />
+            <p className="text-[11px] text-cyan-800 font-medium leading-relaxed">
+              <strong>Manufacturer Curve (PCHIP):</strong> Efficiency is estimated via monotone cubic Hermite (PCHIP) interpolation of 6 tested η vs P_in points from the 5.5 kW / 415 V / 4-pole motor type-test report. Calibration range: 1742–8265 W. Values outside this range are clamped to the nearest boundary.
             </p>
           </div>
         </div>
       )}
 
       {/* ═══════════════ ROI / ENERGY SAVINGS ═══════════════ */}
-      {isMotorConfigured && efficiencyCalc && (
+      {efficiencyCalc && (
         <div className="industrial-card p-6 border-l-4 border-l-emerald-500 bg-gradient-to-br from-surface to-emerald-50/20">
-          <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider mb-5 flex items-center gap-2">
-            <DollarSign className="text-accent-green" size={18} />
-            ROI & Energy Savings Estimation
-          </h3>
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider flex items-center gap-2">
+              <DollarSign className="text-accent-green" size={18} />
+              ROI & Energy Savings Estimation
+            </h3>
+            <div className="flex gap-3">
+              <button onClick={() => setShowSetupModal(true)} className="px-3 py-1.5 rounded-lg border border-primary text-xs font-bold text-primary hover:bg-primary/10 transition-colors">
+                Edit Config
+              </button>
+              <button onClick={handleResetConfig} className="px-3 py-1.5 rounded-lg border border-accent-red text-xs font-bold text-accent-red hover:bg-accent-red/10 transition-colors">
+                Reset
+              </button>
+            </div>
+          </div>
 
           {/* User inputs */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -423,134 +629,25 @@ const ElectricalParams: FC = () => {
                   <span>10yr</span>
                 </div>
               </div>
+
+              {/* ROI Calculation Disclaimer */}
+              <div className="mt-5 flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+                <Info size={14} className="text-emerald-700 flex-shrink-0 mt-0.5" />
+                <p className="text-[11px] text-emerald-800 font-medium leading-relaxed">
+                  <strong>Payback Calculation:</strong> The simple payback time is calculated by taking the Motor Price (from config) and dividing it by the Annual Cost Saved. Cost Saved is derived from the power difference between current efficiency and the target efficiency, multiplied by the assumed Annual Operating Hours and the Electricity Unit Cost.
+                </p>
+              </div>
             </>
           )}
         </div>
       )}
 
-      {/* ═══════════════ ROW 3 — Per-Phase Power Table ═══════════════ */}
-      <div className="industrial-card overflow-hidden">
-        <div className="px-5 pt-5 pb-3">
-          <h3 className="text-xs uppercase font-extrabold tracking-wider text-text-muted flex items-center gap-1.5">
-            <BarChart3 size={14}/> Per-Phase Power Breakdown
-          </h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gradient-to-r from-slate-50 to-cyan-50/40 text-text-secondary">
-                <th className="text-left px-5 py-3 text-xs font-extrabold uppercase tracking-wider">Phase</th>
-                <th className="text-right px-5 py-3 text-xs font-extrabold uppercase tracking-wider">Voltage (V)</th>
-                <th className="text-right px-5 py-3 text-xs font-extrabold uppercase tracking-wider">Current (A)</th>
-                <th className="text-right px-5 py-3 text-xs font-extrabold uppercase tracking-wider">kW</th>
-                <th className="text-right px-5 py-3 text-xs font-extrabold uppercase tracking-wider">kVAR</th>
-                <th className="text-right px-5 py-3 text-xs font-extrabold uppercase tracking-wider">kVA</th>
-                <th className="text-right px-5 py-3 text-xs font-extrabold uppercase tracking-wider">PF</th>
-              </tr>
-            </thead>
-            <tbody className="font-mono">
-              {[
-                { phase: 'L1', color: '#ef4444', bg: 'bg-red-50/40', v: e?.v1n, i: e?.i1, kw: e?.kw1, kvar: e?.kvar1, kva: e?.kva1, pf: e?.pf1 },
-                { phase: 'L2', color: '#f59e0b', bg: 'bg-amber-50/40', v: e?.v2n, i: e?.i2, kw: e?.kw2, kvar: e?.kvar2, kva: e?.kva2, pf: e?.pf2 },
-                { phase: 'L3', color: '#3b82f6', bg: 'bg-blue-50/40', v: e?.v3n, i: e?.i3, kw: e?.kw3, kvar: e?.kvar3, kva: e?.kva3, pf: e?.pf3 },
-              ].map(row => (
-                <tr key={row.phase} className={`${row.bg} border-t border-border/50 hover:bg-surface-muted transition-colors`}>
-                  <td className="px-5 py-3">
-                    <PhaseBadge phase={row.phase} color={row.color} />
-                  </td>
-                  <td className="text-right px-5 py-3 font-bold">{fmt(row.v, 1)}</td>
-                  <td className="text-right px-5 py-3 font-bold">{fmt(row.i, 2)}</td>
-                  <td className="text-right px-5 py-3 font-bold text-emerald-600">{fmt(row.kw, 2)}</td>
-                  <td className="text-right px-5 py-3 font-bold text-amber-600">{fmt(row.kvar, 2)}</td>
-                  <td className="text-right px-5 py-3 font-bold text-violet-600">{fmt(row.kva, 2)}</td>
-                  <td className="text-right px-5 py-3 font-bold">{fmt(row.pf, 3)}</td>
-                </tr>
-              ))}
-              {/* Totals row */}
-              <tr className="bg-gradient-to-r from-cyan-50/50 to-violet-50/50 border-t-2 border-primary/20 font-extrabold">
-                <td className="px-5 py-3 text-xs uppercase tracking-wider text-text-secondary">Total / Avg</td>
-                <td className="text-right px-5 py-3">{fmt(e?.vln_avg, 1)}</td>
-                <td className="text-right px-5 py-3">{fmt(e?.i_avg, 2)}</td>
-                <td className="text-right px-5 py-3 text-emerald-700">{fmt(e?.t_kw, 2)}</td>
-                <td className="text-right px-5 py-3 text-amber-700">{fmt(e?.t_kvar, 2)}</td>
-                <td className="text-right px-5 py-3 text-violet-700">{fmt(e?.t_kva, 2)}</td>
-                <td className="text-right px-5 py-3">{fmt(e?.pf_avg, 3)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* ═══════════════ ROW 4 — Power Factor Gauges ═══════════════ */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
-        {[
-          { label: 'PF L1', val: e?.pf1, color: '#ef4444' },
-          { label: 'PF L2', val: e?.pf2, color: '#f59e0b' },
-          { label: 'PF L3', val: e?.pf3, color: '#3b82f6' },
-          { label: 'PF Avg', val: e?.pf_avg, color: '#0891b2' },
-        ].map(p => (
-          <div key={p.label} className="industrial-card p-5 flex flex-col items-center" style={{ borderTop: `4px solid ${p.color}` }}>
-            <GaugeChart value={p.val ?? 1} min={0} max={1.05} unit="cos φ" label={p.label} thresholds={{ warning: 0.85, critical: 0.7 }} />
-          </div>
-        ))}
-      </div>
-
-      {/* ═══════════════ ROW 5 — Time Series ═══════════════ */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <div className="industrial-card p-5">
-          <div className="h-[320px]">
-            <TimeSeriesChart
-              data={electricalHistory}
-              title="3-Phase L-L Voltage Trend (V)"
-              lines={[
-                { key: 'v12', color: '#ef4444', name: 'L1-L2 Voltage' },
-                { key: 'v23', color: '#f59e0b', name: 'L2-L3 Voltage' },
-                { key: 'v31', color: '#3b82f6', name: 'L3-L1 Voltage' },
-              ]}
-            />
-          </div>
-        </div>
-        <div className="industrial-card p-5">
-          <div className="h-[320px]">
-            <TimeSeriesChart
-              data={electricalHistory}
-              title="3-Phase Current Pattern (A)"
-              lines={[
-                { key: 'i1', color: '#ef4444', name: 'L1 Current' },
-                { key: 'i2', color: '#f59e0b', name: 'L2 Current' },
-                { key: 'i3', color: '#3b82f6', name: 'L3 Current' },
-              ]}
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <div className="industrial-card p-5">
-          <div className="h-[300px]">
-            <TimeSeriesChart
-              data={electricalHistory}
-              title="Active Power per Phase (kW)"
-              lines={[
-                { key: 'kw1', color: '#ef4444', name: 'L1 kW' },
-                { key: 'kw2', color: '#f59e0b', name: 'L2 kW' },
-                { key: 'kw3', color: '#3b82f6', name: 'L3 kW' },
-              ]}
-            />
-          </div>
-        </div>
-        <div className="industrial-card p-5">
-          <div className="h-[300px]">
-            <TimeSeriesChart
-              data={electricalHistory}
-              title="Power Factor Trend (cos φ)"
-              lines={[
-                { key: 'pf', color: '#10b981', name: 'Avg PF' },
-              ]}
-            />
-          </div>
-        </div>
-      </div>
+      {showSetupModal && (
+        <MotorDetailsForm 
+          onClose={() => setShowSetupModal(false)}
+          onSuccess={() => setShowSetupModal(false)}
+        />
+      )}
 
     </div>
   );

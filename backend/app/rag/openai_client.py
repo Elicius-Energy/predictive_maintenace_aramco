@@ -22,14 +22,21 @@ class OpenAIClient:
         self.api_key = None
         self.model = settings.OPENAI_MODEL
         self.client = None
+        self._last_api_key = None
         self._refresh_client()
 
     def _refresh_client(self):
-        """Always prefer the latest `.env` values over import-time state."""
+        """Always prefer the latest `.env` values over import-time state, cache the client."""
         runtime_settings = get_runtime_settings()
+        
+        if self.client and runtime_settings.OPENAI_API_KEY == self._last_api_key:
+            # Settings haven't changed, keep using the same client
+            return
+            
         self.api_key = runtime_settings.OPENAI_API_KEY
+        self._last_api_key = self.api_key
         self.model = runtime_settings.OPENAI_MODEL
-        self.client = AsyncOpenAI(api_key=self.api_key) if self.api_key else None
+        self.client = AsyncOpenAI(api_key=self.api_key, timeout=30.0, max_retries=3) if self.api_key else None
 
     def _fallback_chat_response(self, reason: str) -> str:
         return (
@@ -40,7 +47,7 @@ class OpenAIClient:
         )
             
     async def get_diagnosis(self, fv: FeatureVector, recent_alerts: list[Alert]) -> Optional[FaultDiagnosis]:
-        """Perform RAG and call Claude for diagnosis."""
+        """Perform RAG and call OpenAI for diagnosis."""
         self._refresh_client()
         if not self.client:
             logger.warning("OpenAI API key not set. Skipping AI diagnosis.")
@@ -55,12 +62,16 @@ class OpenAIClient:
             # 2. Build Prompt
             prompt = prompt_builder.build_diagnosis_prompt(fv, context, recent_alerts)
             
-            # 3. Call OpenAI
+            # 3. Call OpenAI with exponential backoff handled by client max_retries
             response = await self.client.chat.completions.create(
                 model=self.model,
                 temperature=0,
                 messages=[{"role": "user", "content": prompt}]
             )
+            
+            # Log token usage
+            if hasattr(response, 'usage') and response.usage:
+                logger.info(f"OpenAI usage (diagnosis): {response.usage.total_tokens} tokens")
             
             # 4. Parse Response
             content = response.choices[0].message.content
@@ -155,7 +166,7 @@ KNOWLEDGE BASE CONTEXT:
             
             messages.append({"role": "user", "content": user_message})
             
-            # 5. Call OpenAI
+            # 5. Call OpenAI with exponential backoff handled by client max_retries
             response = await self.client.chat.completions.create(
                 model=self.model,
                 temperature=0.7,
@@ -164,6 +175,10 @@ KNOWLEDGE BASE CONTEXT:
                     *messages
                 ]
             )
+            
+            # Log token usage
+            if hasattr(response, 'usage') and response.usage:
+                logger.info(f"OpenAI usage (chat): {response.usage.total_tokens} tokens")
             
             return response.choices[0].message.content
             

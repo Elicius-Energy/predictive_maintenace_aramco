@@ -99,6 +99,7 @@ const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ data, lines, yDomain, title
                 strokeWidth={2}
                 connectNulls={true}
                 isAnimationActive={false}
+                animationDuration={0}
               />
             ))}
           </LineChart>

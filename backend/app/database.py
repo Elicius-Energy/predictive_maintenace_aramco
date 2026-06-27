@@ -4,7 +4,7 @@ SQLite time-series storage with WAL mode for concurrent reads.
 import sqlite3
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from contextlib import contextmanager
@@ -28,6 +28,7 @@ class Database:
         conn = sqlite3.connect(self.db_path, timeout=10)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         conn.row_factory = sqlite3.Row
         try:
             yield conn
@@ -100,6 +101,13 @@ class Database:
                 
                 CREATE INDEX IF NOT EXISTS idx_diag_ts 
                     ON ai_diagnoses(timestamp);
+                CREATE INDEX IF NOT EXISTS idx_diag_machine 
+                    ON ai_diagnoses(machine_id, timestamp);
+                    
+                CREATE TABLE IF NOT EXISTS motor_configs (
+                    machine_id TEXT PRIMARY KEY,
+                    config_json TEXT NOT NULL
+                );
             """)
         logger.info(f"Database initialized at {self.db_path}")
     
@@ -115,7 +123,7 @@ class Database:
                  ax, ay, az, gx, gy, gz, temperature)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                reading.get("timestamp", datetime.utcnow().isoformat()),
+                reading.get("timestamp", datetime.now(timezone.utc).isoformat()),
                 reading.get("machine_id", "Machine_5"),
                 reading.get("source", "simulated"),
                 reading.get("voltage"), reading.get("current"),
@@ -138,7 +146,7 @@ class Database:
             conn.execute("""
                 INSERT INTO features (timestamp, machine_id, feature_data)
                 VALUES (?, ?, ?)
-            """, (datetime.utcnow().isoformat(), machine_id, json.dumps(features, default=_json_default)))
+            """, (datetime.now(timezone.utc).isoformat(), machine_id, json.dumps(features, default=_json_default)))
     
     def insert_alert(self, alert: Dict[str, Any]):
         """Insert an alert."""
@@ -148,7 +156,7 @@ class Database:
                                      message, value, threshold)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
-                alert.get("timestamp", datetime.utcnow().isoformat()),
+                alert.get("timestamp", datetime.now(timezone.utc).isoformat()),
                 alert.get("machine_id", "Machine_5"),
                 alert.get("severity", "info"),
                 alert.get("category", ""),
@@ -166,7 +174,7 @@ class Database:
                  explanation, recommended_action, physics_reasoning, retrieved_context)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                diagnosis.get("timestamp", datetime.utcnow().isoformat()),
+                diagnosis.get("timestamp", datetime.now(timezone.utc).isoformat()),
                 diagnosis.get("machine_id", "Machine_5"),
                 diagnosis.get("fault_type"),
                 diagnosis.get("confidence"),
@@ -176,7 +184,21 @@ class Database:
                 diagnosis.get("physics_reasoning"),
                 diagnosis.get("retrieved_context"),
             ))
-    
+
+    def upsert_motor_config(self, machine_id: str, config: Dict[str, Any]):
+        """Insert or update motor configuration for a specific machine."""
+        with self._get_conn() as conn:
+            conn.execute("""
+                INSERT INTO motor_configs (machine_id, config_json)
+                VALUES (?, ?)
+                ON CONFLICT(machine_id) DO UPDATE SET config_json=excluded.config_json
+            """, (machine_id, json.dumps(config)))
+
+    def delete_motor_config(self, machine_id: str):
+        """Delete motor configuration for a specific machine."""
+        with self._get_conn() as conn:
+            conn.execute("DELETE FROM motor_configs WHERE machine_id = ?", (machine_id,))
+            
     # ── Query Operations ───────────────────────────────────────────────────
     
     def get_readings(self, machine_id: str = "Machine_5",
@@ -194,8 +216,8 @@ class Database:
             except ValueError:
                 nth = 1
         else:
-            until = datetime.utcnow().isoformat()
-            since = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat()
+            until = datetime.now(timezone.utc).isoformat()
+            since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
             nth = max(1, (minutes * 60) // 1000) if minutes > 30 else 1
             
         with self._get_conn() as conn:
@@ -225,8 +247,8 @@ class Database:
             except ValueError:
                 nth = 1
         else:
-            until = datetime.utcnow().isoformat()
-            since = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat()
+            until = datetime.now(timezone.utc).isoformat()
+            since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
             nth = max(1, (minutes * 6) // 100) if minutes > 30 else 1
             
         with self._get_conn() as conn:
@@ -252,8 +274,8 @@ class Database:
             since = start_time
             until = end_time
         else:
-            until = datetime.utcnow().isoformat()
-            since = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat()
+            until = datetime.now(timezone.utc).isoformat()
+            since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
             
         with self._get_conn() as conn:
             rows = conn.execute("""
@@ -274,9 +296,20 @@ class Database:
             """, (machine_id, limit)).fetchall()
         return [dict(r) for r in rows]
     
+    def get_motor_config(self, machine_id: str) -> Optional[Dict[str, Any]]:
+        """Get motor configuration for a specific machine."""
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT config_json FROM motor_configs WHERE machine_id = ?", (machine_id,)).fetchone()
+        if row:
+            try:
+                return json.loads(row["config_json"])
+            except json.JSONDecodeError:
+                pass
+        return None
+
     def get_active_machines(self, minutes: int = 10) -> List[str]:
         """Get list of machine IDs that have sent data recently."""
-        since = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat()
+        since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
         with self._get_conn() as conn:
             rows = conn.execute("""
                 SELECT DISTINCT machine_id FROM sensor_readings 
@@ -297,7 +330,7 @@ class Database:
     def get_reading_count(self, machine_id: str = "Machine_5",
                           minutes: int = 1) -> int:
         """Get count of readings in recent period (for rate calculation)."""
-        since = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat()
+        since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
         with self._get_conn() as conn:
             row = conn.execute("""
                 SELECT COUNT(*) as cnt FROM sensor_readings 
@@ -305,15 +338,29 @@ class Database:
             """, (machine_id, since)).fetchone()
         return row["cnt"] if row else 0
     
-    # ── Cleanup ────────────────────────────────────────────────────────────
+    # ── Cleanup & Health ───────────────────────────────────────────────────
     
     def cleanup_old_data(self):
         """Remove data older than retention period."""
-        cutoff = (datetime.utcnow() - timedelta(hours=settings.DATA_RETENTION_HOURS)).isoformat()
+        # NOTE: Called from async context, should eventually use run_in_executor
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=settings.DATA_RETENTION_HOURS)).isoformat()
+        
+        allowed_tables = {"sensor_readings", "features", "alerts", "ai_diagnoses"}
+        
         with self._get_conn() as conn:
-            for table in ["sensor_readings", "features", "alerts", "ai_diagnoses"]:
+            for table in allowed_tables:
                 conn.execute(f"DELETE FROM {table} WHERE timestamp < ?", (cutoff,))
         logger.info(f"Cleaned up data older than {settings.DATA_RETENTION_HOURS}h")
+
+    def health_check(self) -> bool:
+        """Check if database is accessible and working."""
+        try:
+            with self._get_conn() as conn:
+                conn.execute("SELECT 1").fetchone()
+            return True
+        except Exception as e:
+            logger.error(f"Database health check failed: {e}")
+            return False
 
 
 # Singleton instance

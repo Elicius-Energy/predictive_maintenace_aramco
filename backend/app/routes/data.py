@@ -1,64 +1,87 @@
 """
 REST endpoints for historical data and machine metadata.
 """
-from fastapi import APIRouter, Query, HTTPException
+import re
+from fastapi import APIRouter, Query, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from typing import List, Dict, Any
 import io
 import csv
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.database import db
 from app.models import MachineInfo, MachineStatus
+from app.auth import get_current_user
 
 router = APIRouter(prefix="/data", tags=["data"])
 
+# Dependency to validate and sanitize machine_id input
+def validate_machine_id(machine_id: str) -> str:
+    # Only allow alphanumeric, hyphen, and underscore
+    if not re.match(r"^[a-zA-Z0-9_-]+$", machine_id):
+        raise HTTPException(status_code=400, detail="Invalid machine_id format")
+    return machine_id
+
+def sanitize_csv_cell(value: Any) -> Any:
+    """Prevent CSV injection attacks by prefixing dangerous starting chars with a single quote."""
+    if isinstance(value, str) and value and value[0] in ('=', '+', '-', '@', '\t', '\r'):
+        return f"'{value}"
+    return value
+
 @router.get("/history")
 async def get_history(
-    machine_id: str = "sim-pump-001",
+    machine_id: str = Query("sim-pump-001", description="ID of the machine"),
     minutes: int = Query(10, ge=1, le=10080),
     start_time: str = None,
-    end_time: str = None
+    end_time: str = None,
+    current_user: dict = Depends(get_current_user)
 ):
     """Get historical sensor readings."""
-    return db.get_readings(machine_id, minutes, start_time=start_time, end_time=end_time)
+    safe_id = validate_machine_id(machine_id)
+    return db.get_readings(safe_id, minutes, start_time=start_time, end_time=end_time)
 
 @router.get("/features")
 async def get_features(
-    machine_id: str = "sim-pump-001",
+    machine_id: str = Query("sim-pump-001", description="ID of the machine"),
     minutes: int = Query(10, ge=1, le=10080),
     start_time: str = None,
-    end_time: str = None
+    end_time: str = None,
+    current_user: dict = Depends(get_current_user)
 ):
     """Get historical computed features."""
-    return db.get_features(machine_id, minutes, start_time=start_time, end_time=end_time)
+    safe_id = validate_machine_id(machine_id)
+    return db.get_features(safe_id, minutes, start_time=start_time, end_time=end_time)
 
 @router.get("/alerts")
 async def get_alerts(
-    machine_id: str = "sim-pump-001",
+    machine_id: str = Query("sim-pump-001", description="ID of the machine"),
     minutes: int = Query(60, ge=1, le=10080),
     start_time: str = None,
-    end_time: str = None
+    end_time: str = None,
+    current_user: dict = Depends(get_current_user)
 ):
     """Get historical alerts."""
-    return db.get_alerts(machine_id, minutes, start_time=start_time, end_time=end_time)
+    safe_id = validate_machine_id(machine_id)
+    return db.get_alerts(safe_id, minutes, start_time=start_time, end_time=end_time)
 
 @router.get("/download_csv")
 async def download_csv(
-    machine_id: str = "sim-pump-001",
+    machine_id: str = Query("sim-pump-001", description="ID of the machine"),
     minutes: int = Query(60, ge=1, le=10080),
     start_time: str = None,
-    end_time: str = None
+    end_time: str = None,
+    current_user: dict = Depends(get_current_user)
 ):
     """Download historical data as CSV with full 3-phase parameters from features table."""
+    safe_id = validate_machine_id(machine_id)
     
     def csv_generator():
         if start_time and end_time:
             since = start_time
             until = end_time
         else:
-            since = (datetime.utcnow() - timedelta(minutes=minutes)).isoformat()
-            until = datetime.utcnow().isoformat()
+            since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+            until = datetime.now(timezone.utc).isoformat()
             
         with db._get_conn() as conn:
             # Query features table which contains the full 3-phase data as JSON
@@ -67,7 +90,7 @@ async def download_csv(
                 FROM features
                 WHERE machine_id = ? AND timestamp >= ? AND timestamp <= ?
                 ORDER BY timestamp ASC
-            """, (machine_id, since, until))
+            """, (safe_id, since, until))
             
             output = io.StringIO()
             writer = csv.writer(output)
@@ -113,7 +136,7 @@ async def download_csv(
                     el = fd.get("electrical", {})
                     vib = fd.get("vibration", {})
                     
-                    csv_row = [
+                    raw_csv_row = [
                         row["timestamp"], row["machine_id"],
                         # Per-phase voltages (L-N)
                         el.get("v1n", ""), el.get("v2n", ""), el.get("v3n", ""), el.get("vln_avg", ""),
@@ -139,19 +162,27 @@ async def download_csv(
                         # Other
                         fd.get("temperature", ""),
                     ]
-                    writer.writerow(csv_row)
+                    # Sanitize before writing
+                    safe_csv_row = [sanitize_csv_cell(cell) for cell in raw_csv_row]
+                    writer.writerow(safe_csv_row)
+                    
                 yield output.getvalue()
                 output.seek(0)
                 output.truncate(0)
 
+    # Make the filename strictly safe
+    safe_filename = f"export_{safe_id}_{start_time or minutes}.csv"
+    # Basic sanitize against directory traversal in headers
+    safe_filename = safe_filename.replace("/", "_").replace("\\", "_")
+    
     return StreamingResponse(
         csv_generator(),
         media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=export_{machine_id}_{start_time or minutes}.csv"}
+        headers={"Content-Disposition": f"attachment; filename={safe_filename}"}
     )
 
 @router.get("/machines", response_model=List[MachineInfo])
-async def get_machines():
+async def get_machines(current_user: dict = Depends(get_current_user)):
     """Get list of monitored machines based on recent activity, sorted by most recent data first."""
     active_ids = db.get_active_machines(minutes=10)
     
@@ -187,3 +218,26 @@ async def get_machines():
             )
         )
     return machines
+
+@router.get("/machines/{machine_id}/config")
+async def get_motor_config(machine_id: str, current_user: dict = Depends(get_current_user)):
+    """Get motor configuration for a specific machine."""
+    safe_id = validate_machine_id(machine_id)
+    config = db.get_motor_config(safe_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="Configuration not found")
+    return config
+
+@router.post("/machines/{machine_id}/config")
+async def save_motor_config(machine_id: str, config: dict, current_user: dict = Depends(get_current_user)):
+    """Save or update motor configuration for a specific machine."""
+    safe_id = validate_machine_id(machine_id)
+    db.upsert_motor_config(safe_id, config)
+    return {"status": "success", "message": "Configuration saved"}
+
+@router.delete("/machines/{machine_id}/config")
+async def delete_motor_config(machine_id: str, current_user: dict = Depends(get_current_user)):
+    """Delete motor configuration for a specific machine."""
+    safe_id = validate_machine_id(machine_id)
+    db.delete_motor_config(safe_id)
+    return {"status": "success", "message": "Configuration deleted"}

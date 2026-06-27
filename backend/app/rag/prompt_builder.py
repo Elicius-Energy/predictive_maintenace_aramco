@@ -14,11 +14,11 @@ class PromptBuilder:
         v = fv.vibration
         e = fv.electrical
         
-        alerts_str = "\n".join([f"- {a.severity.upper()}: {a.message}" for a in recent_alerts]) if recent_alerts else "None"
+        alerts_str = "\n".join([f"- {a.severity.value.upper()}: {a.message}" for a in recent_alerts]) if recent_alerts else "None"
         context_str = "\n\n".join(context)
         
         prompt = f"""
-Given the following real-time machine data for Machine_5:
+Given the following real-time machine data for {fv.machine_id}:
 
 * Vibration features:
   - RMS Overall: {v.rms_overall:.3f} mm/s

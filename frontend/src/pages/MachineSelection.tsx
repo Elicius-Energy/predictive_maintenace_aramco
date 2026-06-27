@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import type { FC } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMachine } from '../contexts/MachineContext';
 import { Factory, Cog, CheckCircle2, AlertTriangle, ShieldX, ChevronRight, MapPin } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import api from '../utils/api';
+import MotorDetailsForm from './MotorDetailsForm';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -12,10 +15,20 @@ function cn(...inputs: ClassValue[]) {
 const MachineSelection: FC = () => {
   const { machines, activeMachine, setActiveMachine } = useMachine();
   const navigate = useNavigate();
+  const [showSetupModal, setShowSetupModal] = useState(false);
 
-  const handleSelectMachine = (machine: any) => {
+  const handleSelectMachine = async (machine: any) => {
     setActiveMachine(machine);
-    navigate('/dashboard/mechanical');
+    try {
+      const res = await api.get(`/api/data/machines/${machine.machine_id}/config`);
+      if (res.data) {
+        navigate('/dashboard/mechanical');
+      } else {
+        setShowSetupModal(true);
+      }
+    } catch {
+      setShowSetupModal(true);
+    }
   };
 
   return (
@@ -106,6 +119,16 @@ const MachineSelection: FC = () => {
           </div>
         ))}
       </div>
+      
+      {showSetupModal && (
+        <MotorDetailsForm 
+          onClose={() => setShowSetupModal(false)}
+          onSuccess={() => {
+            setShowSetupModal(false);
+            navigate('/dashboard/mechanical');
+          }}
+        />
+      )}
     </div>
   </div>
   );

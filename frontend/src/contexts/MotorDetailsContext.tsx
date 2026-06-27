@@ -1,5 +1,7 @@
-import { createContext, useContext, useState, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { ReactNode, FC } from 'react';
+import { useMachine } from './MachineContext';
+import api from '../utils/api';
 
 export interface MotorDetails {
   motorName: string;
@@ -8,6 +10,7 @@ export interface MotorDetails {
   motorType: 'Induction Motor' | 'SynRM';
   manufacturer: string;
   ratedPower: number;       // kW
+  ratedSpeed: number;       // RPM
   ratedEfficiency: number;  // %
   motorPrice: number;       // currency
   electricityCost: number;  // per kWh
@@ -16,59 +19,86 @@ export interface MotorDetails {
 
 interface MotorDetailsContextType {
   motorDetails: MotorDetails | null;
-  setMotorDetails: (details: MotorDetails) => void;
-  clearMotorDetails: () => void;
+  saveMotorDetails: (details: MotorDetails) => Promise<void>;
+  resetMotorDetails: () => Promise<void>;
+  refreshMotorDetails: () => Promise<void>;
   isMotorConfigured: boolean;
+  loading: boolean;
 }
-
-const STORAGE_KEY = 'ledl_motor_details';
 
 const MotorDetailsContext = createContext<MotorDetailsContextType | undefined>(undefined);
 
-function loadFromStorage(): MotorDetails | null {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      return JSON.parse(stored) as MotorDetails;
-    }
-  } catch {
-    console.warn('Failed to load motor details from localStorage');
-  }
-  return null;
-}
-
-function saveToStorage(details: MotorDetails): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(details));
-  } catch {
-    console.warn('Failed to save motor details to localStorage');
-  }
-}
-
 export const MotorDetailsProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const [motorDetails, setMotorDetailsState] = useState<MotorDetails | null>(() => loadFromStorage());
+  const { activeMachine } = useMachine();
+  const [motorDetails, setMotorDetailsState] = useState<MotorDetails | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
 
-  const setMotorDetails = useCallback((details: MotorDetails) => {
-    setMotorDetailsState(details);
-    saveToStorage(details);
-  }, []);
+  const refreshMotorDetails = useCallback(async () => {
+    if (!activeMachine?.machine_id) {
+      setMotorDetailsState(null);
+      setLoading(false);
+      return;
+    }
 
-  const clearMotorDetails = useCallback(() => {
-    setMotorDetailsState(null);
-    localStorage.removeItem(STORAGE_KEY);
-  }, []);
+    setLoading(true);
+    try {
+      const res = await api.get(`/api/data/machines/${activeMachine.machine_id}/config`);
+      if (res.data) {
+        setMotorDetailsState(res.data as MotorDetails);
+      } else {
+        setMotorDetailsState(null);
+      }
+    } catch (err: any) {
+      if (err.response?.status === 404) {
+        setMotorDetailsState(null); // No config exists yet
+      } else {
+        console.error('Failed to load motor config:', err);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [activeMachine]);
+
+  useEffect(() => {
+    refreshMotorDetails();
+  }, [refreshMotorDetails]);
+
+  const saveMotorDetails = async (details: MotorDetails) => {
+    if (!activeMachine?.machine_id) return;
+    try {
+      await api.post(`/api/data/machines/${activeMachine.machine_id}/config`, details);
+      setMotorDetailsState(details);
+    } catch (err) {
+      console.error('Failed to save motor config:', err);
+      throw err;
+    }
+  };
+
+  const resetMotorDetails = async () => {
+    if (!activeMachine?.machine_id) return;
+    try {
+      await api.delete(`/api/data/machines/${activeMachine.machine_id}/config`);
+      setMotorDetailsState(null);
+    } catch (err) {
+      console.error('Failed to reset motor config:', err);
+      throw err;
+    }
+  };
 
   const isMotorConfigured = motorDetails !== null &&
     motorDetails.motorName.trim() !== '' &&
     motorDetails.ratedPower > 0 &&
+    motorDetails.ratedSpeed > 0 &&
     motorDetails.ratedEfficiency > 0;
 
   return (
     <MotorDetailsContext.Provider value={{
       motorDetails,
-      setMotorDetails,
-      clearMotorDetails,
+      saveMotorDetails,
+      resetMotorDetails,
+      refreshMotorDetails,
       isMotorConfigured,
+      loading,
     }}>
       {children}
     </MotorDetailsContext.Provider>

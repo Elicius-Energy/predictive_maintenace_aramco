@@ -13,3 +13,21 @@ backend/data/faiss_index.*
 node_modules/
 dist/
 .DS_Store
+
+# Logs
+logs/
+*.log
+backend/data/logs/
+
+# Backups
+backups/
+
+# MQTT
+mosquitto.passwd
+
+# Deploy
+deploy.log
+
+# OS
+.DS_Store
+Thumbs.db

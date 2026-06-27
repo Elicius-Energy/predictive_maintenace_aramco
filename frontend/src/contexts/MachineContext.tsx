@@ -1,8 +1,7 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import type { ReactNode, FC } from 'react';
 import type { MachineInfo } from '../types';
-import axios from 'axios';
-import { BACKEND_URL } from '../utils/constants';
+import api from '../utils/api';
 
 interface MachineContextType {
   activeMachine: MachineInfo | null;
@@ -42,7 +41,7 @@ export const MachineProvider: FC<{ children: ReactNode }> = ({ children }) => {
 
   const refreshMachines = useCallback(async () => {
     try {
-      const response = await axios.get(`${BACKEND_URL}/api/data/machines`);
+      const response = await api.get(`/api/data/machines`);
       const realMachines: MachineInfo[] = response.data;
       setMachines(realMachines);
       // Auto-select the first machine (most recently active) if user hasn't manually selected one

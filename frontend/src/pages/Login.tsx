@@ -1,20 +1,39 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Activity } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import api from '../utils/api';
 
 const Login = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
+  const { login } = useAuth();
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (username === 'admin' && password === 'admin') {
-      sessionStorage.setItem('isAuthenticated', 'true');
+    setError('');
+    setIsSubmitting(true);
+    
+    try {
+      const response = await api.post('/api/auth/login', {
+        username,
+        password
+      });
+      
+      const { access_token } = response.data;
+      login(access_token);
       navigate('/');
-    } else {
-      setError('Invalid username or password');
+    } catch (err: any) {
+      if (err.response && err.response.status === 401) {
+        setError('Invalid username or password');
+      } else {
+        setError('Connection error. Please ensure backend is running.');
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -65,6 +84,7 @@ const Login = () => {
                 onChange={(e) => setUsername(e.target.value)}
                 className="w-full px-5 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary/50 text-gray-900 font-medium transition-all"
                 placeholder="admin"
+                disabled={isSubmitting}
               />
             </div>
             
@@ -76,15 +96,17 @@ const Login = () => {
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-5 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary/50 text-gray-900 font-medium transition-all"
                 placeholder="•••••"
+                disabled={isSubmitting}
               />
             </div>
           </div>
 
           <button
             type="submit"
-            className="w-full bg-primary hover:bg-indigo-600 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-primary/20 hover:shadow-primary/40 active:transform active:scale-[0.98]"
+            disabled={isSubmitting}
+            className={`w-full bg-primary hover:bg-indigo-600 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-primary/20 hover:shadow-primary/40 active:transform active:scale-[0.98] ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
           >
-            Access System
+            {isSubmitting ? 'Authenticating...' : 'Access System'}
           </button>
         </form>
 

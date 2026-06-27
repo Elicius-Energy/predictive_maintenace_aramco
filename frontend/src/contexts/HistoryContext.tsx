@@ -1,9 +1,8 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import type { ReactNode, FC } from 'react';
-import axios from 'axios';
-import { useSensorData } from '../hooks/useSensorData';
+import api from '../utils/api';
+
 import { useMachine } from './MachineContext';
-import { BACKEND_URL } from '../utils/constants';
 import type { FeatureVector } from '../types';
 
 interface HistoryContextType {
@@ -27,7 +26,7 @@ function toEpoch(ts: string): number {
 }
 
 export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
-  const { latestReading, latestFeatures } = useSensorData();
+
   const { activeMachine, timeRange } = useMachine();
 
   const [tempHistory, setTempHistory] = useState<any[]>([]);
@@ -46,14 +45,14 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
     setIsFetching(true);
     try {
       const [readingsRes, featuresRes] = await Promise.all([
-        axios.get(`${BACKEND_URL}/api/data/history`, {
+        api.get(`/api/data/history`, {
           params: { 
             machine_id: activeMachine.machine_id, 
             start_time: new Date(timeRange.start).toISOString(),
             end_time: new Date(timeRange.end).toISOString()
           }
         }),
-        axios.get(`${BACKEND_URL}/api/data/features`, {
+        api.get(`/api/data/features`, {
           params: { 
             machine_id: activeMachine.machine_id, 
             start_time: new Date(timeRange.start).toISOString(),
@@ -123,90 +122,7 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
     fetchHistory();
   }, [fetchHistory]);
 
-  // Append sensor readings directly (no 1-second delay)
-  useEffect(() => {
-    if (latestReading && latestReading.machine_id === activeMachine?.machine_id) {
-      const startMs = new Date(timeRange.start).getTime();
-      const endMs = new Date(timeRange.end).getTime();
-      
-      // If viewing historical data, don't append live data
-      if (Date.now() - endMs > 60000) return;
-      
-      const cutoff = startMs;
-      
-      setMechanicalHistory(prev => {
-        const merged = [...prev, {
-          timestamp: latestReading.timestamp,
-          ax: latestReading.accel?.ax || 0,
-          ay: latestReading.accel?.ay || 0,
-          az: latestReading.accel?.az || 0,
-        }];
-        return merged.filter(d => toEpoch(d.timestamp) >= cutoff).slice(-MAX_BUFFER);
-      });
-
-      // NOTE: We intentionally do NOT append to electricalHistory here.
-      // The raw sensor_data message has a legacy EnergyData object without
-      // per-phase fields (v1n, i1, kw1 etc.), so appending it would inject
-      // rows with 0 values that pollute the chart tooltips.
-      // Instead, electricalHistory is populated exclusively from the
-      // latestFeatures effect below, which carries the full 3-phase data.
-    }
-  }, [latestReading, activeMachine?.machine_id, timeRange.start, timeRange.end]);
-
-  // Append feature data directly
-  useEffect(() => {
-    if (latestFeatures && latestFeatures.machine_id === activeMachine?.machine_id) {
-      const startMs = new Date(timeRange.start).getTime();
-      const endMs = new Date(timeRange.end).getTime();
-      
-      if (Date.now() - endMs > 60000) return;
-      
-      const cutoff = startMs;
-      
-      // Also update electrical history from features since it contains the full 3-phase data
-      setElectricalHistory(prev => {
-        const merged = [...prev, {
-          timestamp: latestFeatures.timestamp,
-          dTS: latestFeatures.electrical?.dTS || 0,
-          p: latestFeatures.electrical.active_power || 0,
-          kva: latestFeatures.electrical.apparent_power || 0,
-          i: latestFeatures.electrical.current || 0,
-          pf: latestFeatures.electrical.power_factor || 0,
-          v1n: latestFeatures.electrical.v1n || 0,
-          v2n: latestFeatures.electrical.v2n || 0,
-          v3n: latestFeatures.electrical.v3n || 0,
-          v12: latestFeatures.electrical.v12 || 0,
-          v23: latestFeatures.electrical.v23 || 0,
-          v31: latestFeatures.electrical.v31 || 0,
-          i1: latestFeatures.electrical.i1 || 0,
-          i2: latestFeatures.electrical.i2 || 0,
-          i3: latestFeatures.electrical.i3 || 0,
-          kw1: latestFeatures.electrical.kw1 || 0,
-          kw2: latestFeatures.electrical.kw2 || 0,
-          kw3: latestFeatures.electrical.kw3 || 0,
-        }];
-        // Deduplicate by timestamp if needed, but for simplicity just append and sort/filter
-        return merged.filter(d => toEpoch(d.timestamp) >= cutoff).slice(-MAX_BUFFER);
-      });
-
-      setTempHistory(prev => {
-        const merged = [...prev, {
-          timestamp: latestFeatures.timestamp,
-          temperature: latestFeatures.temperature || 0,
-        }];
-        return merged.filter(d => toEpoch(d.timestamp) >= cutoff).slice(-MAX_BUFFER);
-      });
-      
-      setAnomalyHistory(prev => {
-        const merged = [...prev, {
-          timestamp: latestFeatures.timestamp,
-          anomaly: (latestFeatures.anomaly_score || 0) * 100,
-          health: latestFeatures.health_score || 0,
-        }];
-        return merged.filter(d => toEpoch(d.timestamp) >= cutoff).slice(-MAX_BUFFER);
-      });
-    }
-  }, [latestFeatures, activeMachine?.machine_id, timeRange.start, timeRange.end]);
+  // Live data appending removed per user request so that line charts only show data for the selected START/END periods.
 
   // Compute period energy by trapezoid integration of active power over the time window
   const periodEnergy = useMemo(() => {

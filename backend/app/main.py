@@ -6,15 +6,23 @@ import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.extension import Limiter
+from slowapi.util import get_remote_address
 
+# Setup logging FIRST before importing anything that might create a logger
+from app.logging_config import setup_logging
 from app.config import settings
+setup_logging(log_level=settings.LOG_LEVEL)
+logger = logging.getLogger(__name__)
+
 from app.database import db
 from app.mqtt_client import mqtt_client
-
 from app.websocket_manager import ws_manager
 from app.models import WSMessage, SensorReading, DataSource, FeatureVector
 from app.feature_engineering import feature_extractor
@@ -23,14 +31,13 @@ from app.ml_engine import ml_engine
 from app.rag.openai_client import ai_client
 from app.rag.embeddings import embedding_manager
 
-from app.routes import data, ws, rag
+from app.routes import data, ws, rag, auth
+from app.middleware import RequestIDMiddleware, RequestLoggingMiddleware
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+limiter = Limiter(key_func=get_remote_address)
+
+# Global background tasks store to prevent GC
+_background_tasks = set()
 
 # ── Lifespan Management ──────────────────────────────────────────────────
 
@@ -40,7 +47,9 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing LEDL PdM System...")
     
     # 1. Initialize RAG Index in the background so it doesn't block MQTT startup
-    asyncio.create_task(asyncio.to_thread(embedding_manager.initialize))
+    task_rag = asyncio.create_task(asyncio.to_thread(embedding_manager.initialize))
+    _background_tasks.add(task_rag)
+    task_rag.add_done_callback(_background_tasks.discard)
     
     # 2. Start MQTT Client
     loop = asyncio.get_running_loop()
@@ -50,16 +59,22 @@ async def lifespan(app: FastAPI):
     mqtt_client.set_data_callback(data_pipeline_handler)
     
     # 4. Start Background Tasks
-
-    asyncio.create_task(cleanup_task())
+    task_cleanup = asyncio.create_task(cleanup_task())
+    _background_tasks.add(task_cleanup)
+    task_cleanup.add_done_callback(_background_tasks.discard)
     
     if settings.ENABLE_AI_CONTINUOUS_DIAGNOSIS:
-        asyncio.create_task(ai_diagnosis_task())
+        task_ai = asyncio.create_task(ai_diagnosis_task())
+        _background_tasks.add(task_ai)
+        task_ai.add_done_callback(_background_tasks.discard)
     
     yield
     
     # Shutdown tasks
+    logger.info("Initiating graceful shutdown...")
     await mqtt_client.stop()
+    for task in _background_tasks:
+        task.cancel()
     logger.info("System shutdown complete.")
 
 # ── App Definition ────────────────────────────────────────────────────────
@@ -71,17 +86,22 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS workaround
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Middleware
+app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(RequestIDMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_origin_regex=settings.CORS_ORIGIN_REGEX,
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Include routes
+app.include_router(auth.router, prefix="/api")
 app.include_router(data.router, prefix="/api")
 app.include_router(rag.router, prefix="/api")
 app.include_router(ws.router)
@@ -152,42 +172,50 @@ async def data_pipeline_handler(reading: SensorReading):
 
 # ── Background Tasks ─────────────────────────────────────────────────────
 
-
-
 async def ai_diagnosis_task():
     """Periodic AI reasoning task — cycles through all machines."""
     logger.info("AI Diagnosis background task started.")
-    while True:
-        active_machines = db.get_active_machines(minutes=10)
-        for machine_id in active_machines:
-            try:
-                # 1. Get latest features for this machine
-                feats = db.get_features(machine_id=machine_id, minutes=1)
-                if feats:
-                    latest_f_dict = feats[0]["feature_data"]
-                    from pydantic import TypeAdapter
-                    fv = TypeAdapter(FeatureVector).validate_python(latest_f_dict)
-                    
-                    # 2. Get recent alerts
-                    recent_alerts = db.get_alerts(machine_id=machine_id, minutes=10)
-                    from app.models import Alert
-                    alert_objs = [Alert(**a) for a in recent_alerts]
-                    
-                    # 3. Call OpenAI
-                    diagnosis = await ai_client.get_diagnosis(fv, alert_objs)
-                    if diagnosis:
-                        db.insert_diagnosis(diagnosis.model_dump())
-                        await ws_manager.broadcast(WSMessage(type="ai_diagnosis", data=diagnosis.model_dump()))
-            except Exception as e:
-                logger.error(f"AI Task Error for {machine_id}: {e}")
-            
-        await asyncio.sleep(settings.RAG_AUTO_INTERVAL_SECONDS)
+    try:
+        while True:
+            active_machines = db.get_active_machines(minutes=10)
+            for machine_id in active_machines:
+                try:
+                    # 1. Get latest features for this machine
+                    feats = db.get_features(machine_id=machine_id, minutes=1)
+                    if feats:
+                        latest_f_dict = feats[0]["feature_data"]
+                        from pydantic import TypeAdapter
+                        fv = TypeAdapter(FeatureVector).validate_python(latest_f_dict)
+                        
+                        # 2. Get recent alerts
+                        recent_alerts = db.get_alerts(machine_id=machine_id, minutes=10)
+                        from app.models import Alert
+                        alert_objs = [Alert(**a) for a in recent_alerts]
+                        
+                        # 3. Call OpenAI
+                        diagnosis = await ai_client.get_diagnosis(fv, alert_objs)
+                        if diagnosis:
+                            db.insert_diagnosis(diagnosis.model_dump())
+                            await ws_manager.broadcast(WSMessage(type="ai_diagnosis", data=diagnosis.model_dump()))
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.error(f"AI Task Error for {machine_id}: {e}")
+                
+            await asyncio.sleep(settings.RAG_AUTO_INTERVAL_SECONDS)
+    except asyncio.CancelledError:
+        logger.info("AI Diagnosis background task stopped.")
 
 async def cleanup_task():
     """Periodic DB cleanup."""
-    while True:
-        db.cleanup_old_data()
-        await asyncio.sleep(3600) # Every hour
+    logger.info("Cleanup background task started.")
+    try:
+        while True:
+            # We use run_in_executor in database.py eventually, but since it's SQLite we just call it
+            db.cleanup_old_data()
+            await asyncio.sleep(3600) # Every hour
+    except asyncio.CancelledError:
+        logger.info("Cleanup background task stopped.")
 
 # ── Root ──────────────────────────────────────────────────────────────────
 
@@ -198,7 +226,21 @@ async def root():
         "system": "LEDL Predictive Maintenance Dashboard",
         "backend": "FastAPI",
         "agent": "Antigravity AI",
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint for Docker and monitoring."""
+    db_ok = db.health_check()
+    return {
+        "status": "healthy" if db_ok else "unhealthy",
+        "uptime": "N/A", # Track start time to add uptime
+        "version": "1.0.0",
+        "mqtt_connected": mqtt_client.client.is_connected() if mqtt_client.client else False,
+        "ws_clients": ws_manager.get_connection_count(),
+        "db_ok": db_ok,
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
 if __name__ == "__main__":

@@ -136,14 +136,19 @@ class FeatureExtractor:
         if not e:
             return ElectricalFeatures()
             
-        # Estimated efficiency (simplified model)
-        # Power loss ~ Copper loss + Iron loss (approximated)
-        theoretical_power = e.V * e.I * np.sqrt(3) # Apparent if P was missing
-        efficiency = (e.P / theoretical_power * 100) if theoretical_power > 0 else 0
-        efficiency = min(100, max(0, efficiency))
-        
-        # Load percentage (assume nominal 10kW motor)
-        load_pct = (e.P / 10.0) * 100 
+        # ── Manufacturer-curve efficiency (PCHIP interpolation) ─────────
+        from app.motor_efficiency import motor_efficiency_estimator
+
+        # P_in in watts — e.P is already in watts for single-phase data
+        p_in_w = e.P
+        eff_result = motor_efficiency_estimator.estimate(
+            p_in_watts=p_in_w,
+            voltage=e.V,
+            current=e.I,
+            pf=e.pf,
+        )
+        efficiency = eff_result.efficiency_pct
+        load_pct = eff_result.load_pct
         
         features = ElectricalFeatures(
             voltage=e.V,
