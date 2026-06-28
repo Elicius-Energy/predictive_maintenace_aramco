@@ -44,7 +44,7 @@ class SimulationMode(str, Enum):
 # ── Sensor Data Models ─────────────────────────────────────────────────────
 
 class EnergyData(BaseModel):
-    """Electrical parameters from energy/Machine_10 topic."""
+    """Electrical parameters from energy topic."""
     V: float = Field(0.0, description="Voltage (V)")
     I: float = Field(0.0, description="Current (A)")
     P: float = Field(0.0, description="Active Power (W)")
@@ -122,7 +122,7 @@ class AccelData(BaseModel):
 class SensorReading(BaseModel):
     """Combined sensor reading with timestamp and source info."""
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    machine_id: str = "Machine_10"
+    machine_id: str = "LEDL_Demo"
     source: DataSource = DataSource.SIMULATED
     energy: Optional[EnergyData] = None
     accel: Optional[AccelData] = None
@@ -214,7 +214,7 @@ class ElectricalFeatures(BaseModel):
 class FeatureVector(BaseModel):
     """Complete feature vector for ML and AI analysis."""
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    machine_id: str = "Machine_10"
+    machine_id: str = "LEDL_Demo"
     vibration: VibrationFeatures = Field(default_factory=VibrationFeatures)
     electrical: ElectricalFeatures = Field(default_factory=ElectricalFeatures)
     temperature: float = 0.0
@@ -248,7 +248,7 @@ class Alert(BaseModel):
     """System alert."""
     id: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    machine_id: str = "Machine_10"
+    machine_id: str = "LEDL_Demo"
     severity: Severity = Severity.INFO
     category: str = ""
     message: str = ""
@@ -262,7 +262,7 @@ class Alert(BaseModel):
 class FaultDiagnosis(BaseModel):
     """AI-generated fault diagnosis from RAG pipeline."""
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    machine_id: str = "Machine_10"
+    machine_id: str = "LEDL_Demo"
     fault_type: str = "none"
     confidence: float = Field(0.0, ge=0.0, le=1.0)
     severity: Severity = Severity.INFO

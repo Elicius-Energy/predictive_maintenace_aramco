@@ -46,7 +46,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS sensor_readings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
-                    machine_id TEXT NOT NULL DEFAULT 'Machine_5',
+                    machine_id TEXT NOT NULL DEFAULT 'LEDL_Demo',
                     source TEXT NOT NULL DEFAULT 'simulated',
                     voltage REAL, current REAL, active_power REAL,
                     apparent_power REAL, power_factor REAL, energy REAL,
@@ -64,7 +64,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS features (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
-                    machine_id TEXT NOT NULL DEFAULT 'Machine_5',
+                    machine_id TEXT NOT NULL DEFAULT 'LEDL_Demo',
                     feature_data TEXT NOT NULL
                 );
                 
@@ -74,7 +74,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS alerts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
-                    machine_id TEXT NOT NULL DEFAULT 'Machine_5',
+                    machine_id TEXT NOT NULL DEFAULT 'LEDL_Demo',
                     severity TEXT NOT NULL,
                     category TEXT,
                     message TEXT NOT NULL,
@@ -89,7 +89,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS ai_diagnoses (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TEXT NOT NULL,
-                    machine_id TEXT NOT NULL DEFAULT 'Machine_5',
+                    machine_id TEXT NOT NULL DEFAULT 'LEDL_Demo',
                     fault_type TEXT,
                     confidence REAL,
                     severity TEXT,
@@ -124,7 +124,7 @@ class Database:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 reading.get("timestamp", datetime.now(timezone.utc).isoformat()),
-                reading.get("machine_id", "Machine_5"),
+                reading.get("machine_id", "LEDL_Demo"),
                 reading.get("source", "simulated"),
                 reading.get("voltage"), reading.get("current"),
                 reading.get("active_power"), reading.get("apparent_power"),
@@ -157,7 +157,7 @@ class Database:
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 alert.get("timestamp", datetime.now(timezone.utc).isoformat()),
-                alert.get("machine_id", "Machine_5"),
+                alert.get("machine_id", "LEDL_Demo"),
                 alert.get("severity", "info"),
                 alert.get("category", ""),
                 alert.get("message", ""),
@@ -175,7 +175,7 @@ class Database:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 diagnosis.get("timestamp", datetime.now(timezone.utc).isoformat()),
-                diagnosis.get("machine_id", "Machine_5"),
+                diagnosis.get("machine_id", "LEDL_Demo"),
                 diagnosis.get("fault_type"),
                 diagnosis.get("confidence"),
                 diagnosis.get("severity"),
@@ -201,7 +201,7 @@ class Database:
             
     # ── Query Operations ───────────────────────────────────────────────────
     
-    def get_readings(self, machine_id: str = "Machine_5",
+    def get_readings(self, machine_id: str = "LEDL_Demo",
                      minutes: int = 10, limit: int = 2000,
                      start_time: Optional[str] = None, end_time: Optional[str] = None) -> List[Dict]:
         """Get recent sensor readings with adaptive sampling."""
@@ -232,7 +232,7 @@ class Database:
             rows = conn.execute(query, (machine_id, since, until, nth, limit)).fetchall()
         return [dict(r) for r in rows]
     
-    def get_features(self, machine_id: str = "Machine_5",
+    def get_features(self, machine_id: str = "LEDL_Demo",
                      minutes: int = 10, limit: int = 2000,
                      start_time: Optional[str] = None, end_time: Optional[str] = None) -> List[Dict]:
         """Get recent computed features with adaptive sampling."""
@@ -266,7 +266,7 @@ class Database:
             for r in rows
         ]
     
-    def get_alerts(self, machine_id: str = "Machine_5",
+    def get_alerts(self, machine_id: str = "LEDL_Demo",
                    minutes: int = 60, limit: int = 50,
                    start_time: Optional[str] = None, end_time: Optional[str] = None) -> List[Dict]:
         """Get recent alerts."""
@@ -285,7 +285,7 @@ class Database:
             """, (machine_id, since, until, limit)).fetchall()
         return [dict(r) for r in rows]
     
-    def get_diagnoses(self, machine_id: str = "Machine_5",
+    def get_diagnoses(self, machine_id: str = "LEDL_Demo",
                       limit: int = 10) -> List[Dict]:
         """Get recent AI diagnoses."""
         with self._get_conn() as conn:
@@ -327,7 +327,7 @@ class Database:
             """).fetchall()
         return [row["machine_id"] for row in rows]
     
-    def get_latest_reading(self, machine_id: str = "Machine_5") -> Optional[Dict]:
+    def get_latest_reading(self, machine_id: str = "LEDL_Demo") -> Optional[Dict]:
         """Get the most recent sensor reading."""
         with self._get_conn() as conn:
             row = conn.execute("""
@@ -337,7 +337,7 @@ class Database:
             """, (machine_id,)).fetchone()
         return dict(row) if row else None
     
-    def get_reading_count(self, machine_id: str = "Machine_5",
+    def get_reading_count(self, machine_id: str = "LEDL_Demo",
                           minutes: int = 1) -> int:
         """Get count of readings in recent period (for rate calculation)."""
         since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()

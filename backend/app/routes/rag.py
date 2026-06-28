@@ -15,7 +15,7 @@ router = APIRouter(prefix="/rag", tags=["rag"])
 
 @router.get("/history")
 async def get_diagnosis_history(
-    machine_id: str = "Machine_5", 
+    machine_id: str = "LEDL_Demo", 
     limit: int = 10,
     current_user: dict = Depends(get_current_user)
 ):
