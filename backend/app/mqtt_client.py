@@ -47,11 +47,11 @@ class MQTTClient:
             logger.info(f"Connected to MQTT broker at {settings.MQTT_BROKER_HOST}:{settings.MQTT_BROKER_PORT}")
             self.connected = True
             self._reconnect_delay = settings.MQTT_RECONNECT_DELAY
-            # Subscribe to both topics
-            client.subscribe(settings.MQTT_TOPIC_ENERGY)
-            client.subscribe(settings.MQTT_TOPIC_ACCEL)
+            # Subscribe only to LEDL topic, removing legacy simulation/energy topics
+            # client.subscribe(settings.MQTT_TOPIC_ENERGY)
+            # client.subscribe(settings.MQTT_TOPIC_ACCEL)
             client.subscribe(settings.MQTT_TOPIC_LEDL)
-            logger.info(f"Subscribed to: {settings.MQTT_TOPIC_ENERGY}, {settings.MQTT_TOPIC_ACCEL}, {settings.MQTT_TOPIC_LEDL}")
+            logger.info(f"Subscribed to: {settings.MQTT_TOPIC_LEDL}")
         else:
             logger.error(f"MQTT connection failed with code {rc}")
             self.connected = False
