@@ -316,6 +316,16 @@ class Database:
                 WHERE timestamp > ?
             """, (since,)).fetchall()
         return [row["machine_id"] for row in rows]
+
+    def get_all_machines(self) -> List[str]:
+        """Get list of all machine IDs that have ever sent data or have configs."""
+        with self._get_conn() as conn:
+            rows = conn.execute("""
+                SELECT DISTINCT machine_id FROM sensor_readings
+                UNION
+                SELECT DISTINCT machine_id FROM motor_configs
+            """).fetchall()
+        return [row["machine_id"] for row in rows]
     
     def get_latest_reading(self, machine_id: str = "Machine_5") -> Optional[Dict]:
         """Get the most recent sensor reading."""

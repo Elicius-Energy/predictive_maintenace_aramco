@@ -183,8 +183,8 @@ async def download_csv(
 
 @router.get("/machines", response_model=List[MachineInfo])
 async def get_machines(current_user: dict = Depends(get_current_user)):
-    """Get list of monitored machines based on recent activity, sorted by most recent data first."""
-    active_ids = db.get_active_machines(minutes=10)
+    """Get list of all monitored machines, sorted by most recent data first."""
+    active_ids = db.get_all_machines()
     
     # Map device IDs to friendly names
     DEVICE_NAME_MAP = {
