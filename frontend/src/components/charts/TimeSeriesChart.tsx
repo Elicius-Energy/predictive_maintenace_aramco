@@ -68,7 +68,7 @@ const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ data, lines, yDomain, title
                 try {
                   // We formatted all timestamps to standard UTC epoch, 
                   // so we can reliably use Asia/Kolkata here.
-                  return new Date(unix).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+                  return new Date(unix).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false });
                 } catch {
                   return '';
                 }
@@ -85,7 +85,7 @@ const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ data, lines, yDomain, title
             <Tooltip 
               contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', fontSize: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}
               itemStyle={{ padding: '2px 0' }}
-              labelFormatter={(unix) => new Date(unix).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false })}
+              labelFormatter={(unix) => new Date(unix).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false })}
             />
             <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
             {lines.map((line) => (

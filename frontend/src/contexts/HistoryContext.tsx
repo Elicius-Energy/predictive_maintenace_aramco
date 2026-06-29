@@ -62,12 +62,36 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
       ]);
 
       // Backend returns newest first, we want oldest first for charts
-      const readings = [...readingsRes.data].sort((a: any, b: any) => 
+      let readings = [...readingsRes.data].sort((a: any, b: any) => 
         toEpoch(a.timestamp) - toEpoch(b.timestamp)
       );
-      const features = [...featuresRes.data].sort((a: any, b: any) => 
+      let features = [...featuresRes.data].sort((a: any, b: any) => 
         toEpoch(a.timestamp) - toEpoch(b.timestamp)
       );
+
+      const downsample10Min = (data: any[]) => {
+        if (!data || data.length === 0) return [];
+        const downsampled = [];
+        const TEN_MIN_MS = 10 * 60 * 1000;
+        let currentBucket = Math.floor(toEpoch(data[0].timestamp) / TEN_MIN_MS);
+        let latestInBucket = data[0];
+
+        for (let i = 1; i < data.length; i++) {
+          const bucket = Math.floor(toEpoch(data[i].timestamp) / TEN_MIN_MS);
+          if (bucket === currentBucket) {
+            latestInBucket = data[i];
+          } else {
+            downsampled.push(latestInBucket);
+            currentBucket = bucket;
+            latestInBucket = data[i];
+          }
+        }
+        downsampled.push(latestInBucket);
+        return downsampled;
+      };
+
+      readings = downsample10Min(readings);
+      features = downsample10Min(features);
 
       if (features.length > 0) {
         setLatestHistoricalFeatures(features[features.length - 1].feature_data || features[features.length - 1]);
