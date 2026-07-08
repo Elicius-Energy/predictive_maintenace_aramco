@@ -241,3 +241,44 @@ async def delete_motor_config(machine_id: str, current_user: dict = Depends(get_
     safe_id = validate_machine_id(machine_id)
     db.delete_motor_config(safe_id)
     return {"status": "success", "message": "Configuration deleted"}
+
+@router.get("/stats")
+async def get_machine_stats(machine_id: str = Query("sim-pump-001"), current_user: dict = Depends(get_current_user)):
+    """Get overall lifetime run hours and total energy from the entire database history."""
+    safe_id = validate_machine_id(machine_id)
+    with db._get_conn() as conn:
+        row = conn.execute("""
+            SELECT min(timestamp) as min_ts, max(timestamp) as max_ts
+            FROM features
+            WHERE machine_id = ?
+        """, (safe_id,)).fetchone()
+        
+        min_ts = row["min_ts"]
+        max_ts = row["max_ts"]
+        
+        if not min_ts or not max_ts:
+            return {"run_time_hours": 0.0, "total_energy_kwh": 0.0}
+            
+        t0 = datetime.fromisoformat(min_ts.replace("Z", "+00:00")).timestamp()
+        t1 = datetime.fromisoformat(max_ts.replace("Z", "+00:00")).timestamp()
+        run_time_hours = (t1 - t0) / 3600.0
+        
+        latest_row = conn.execute("""
+            SELECT feature_data FROM features
+            WHERE machine_id = ?
+            ORDER BY timestamp DESC LIMIT 1
+        """, (safe_id,)).fetchone()
+        
+        total_energy_kwh = 0.0
+        if latest_row:
+            try:
+                fd = json.loads(latest_row["feature_data"])
+                el = fd.get("electrical", {})
+                total_energy_kwh = el.get("energy_cumulative") or el.get("kwh_imp") or 0.0
+            except:
+                pass
+                
+        return {
+            "run_time_hours": round(run_time_hours, 2),
+            "total_energy_kwh": round(total_energy_kwh, 2)
+        }

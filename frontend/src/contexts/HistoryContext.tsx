@@ -38,6 +38,8 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [electricalHistory, setElectricalHistory] = useState<any[]>([]);
   const [latestHistoricalFeatures, setLatestHistoricalFeatures] = useState<FeatureVector | null>(null);
   const [isFetching, setIsFetching] = useState(false);
+  const [periodEnergy, setPeriodEnergy] = useState(0);
+  const [runTimeHours, setRunTimeHours] = useState(0);
 
   /** Fetch historical blocks from the database */
   const fetchHistory = useCallback(async () => {
@@ -47,7 +49,7 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
 
     setIsFetching(true);
     try {
-      const [readingsRes, featuresRes] = await Promise.all([
+      const [readingsRes, featuresRes, statsRes] = await Promise.all([
         api.get(`/api/data/history`, {
           params: { 
             machine_id: activeMachine.machine_id, 
@@ -61,6 +63,9 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
             start_time: new Date(timeRange.start).toISOString(),
             end_time: new Date(timeRange.end).toISOString()
           }
+        }),
+        api.get(`/api/data/stats`, {
+          params: { machine_id: activeMachine.machine_id }
         })
       ]);
 
@@ -137,6 +142,11 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
         health: f.feature_data?.health_score || 0,
       })).slice(-MAX_BUFFER));
 
+      if (statsRes.data) {
+        setPeriodEnergy(statsRes.data.total_energy_kwh || 0);
+        setRunTimeHours(statsRes.data.run_time_hours || 0);
+      }
+
     } catch (err) {
       console.error('Failed to pre-load historical data:', err);
     } finally {
@@ -201,27 +211,7 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
 
   }, [latestFeatures, isAutoUpdate]);
 
-  // Compute period energy and run time by trapezoid integration of active power over the time window
-  const { periodEnergy, runTimeHours } = useMemo(() => {
-    if (electricalHistory.length < 2) return { periodEnergy: 0, runTimeHours: 0 };
-    let totalKwh = 0;
-    let runTime = 0;
-    for (let i = 1; i < electricalHistory.length; i++) {
-      const p0 = electricalHistory[i - 1].p || 0; // active power in kW
-      const p1 = electricalHistory[i].p || 0;
-      const t0 = toEpoch(electricalHistory[i - 1].timestamp);
-      const t1 = toEpoch(electricalHistory[i].timestamp);
-      const dtHours = (t1 - t0) / 3600000; // ms → hours
-      if (dtHours > 0 && dtHours < 1) { // skip gaps > 1 hour
-        totalKwh += ((p0 + p1) / 2) * dtHours;
-        // Motor is considered running if active power > 0.05 kW
-        if (p0 > 0.05 || p1 > 0.05) {
-          runTime += dtHours;
-        }
-      }
-    }
-    return { periodEnergy: Math.abs(totalKwh), runTimeHours: runTime };
-  }, [electricalHistory]);
+
 
   return (
     <HistoryContext.Provider value={{

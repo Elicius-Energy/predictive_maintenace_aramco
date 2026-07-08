@@ -31,17 +31,7 @@ export const useSensorData = () => {
           return;
       }
 
-      // Throttle updates to one per 10 minutes (600,000 ms)
-      const tsStr = message.data.timestamp;
-      if (tsStr && (message.type === 'sensor_data' || message.type === 'features')) {
-        const tsEpoch = new Date(tsStr.endsWith('Z') ? tsStr : tsStr + 'Z').getTime();
-        const currentBucket = Math.floor(tsEpoch / 600000);
-        
-        if (lastBucketRef.current === currentBucket) {
-          return; // Ignore updates within the same 10-minute bucket
-        }
-        lastBucketRef.current = currentBucket;
-      }
+
 
       switch (message.type) {
         case 'sensor_data':
