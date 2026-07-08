@@ -163,7 +163,7 @@ const Topbar: FC = () => {
           </div>
         </div>
 
-        <div className="flex flex-col items-end border-l border-border pl-6">
+        <div className="flex flex-col items-end border-l border-border pl-6 pr-2">
           <div className="flex items-center gap-2 text-text-primary font-mono text-sm font-bold">
             <Clock size={14} className="text-primary" />
             {format(time, 'HH:mm:ss')}
@@ -171,6 +171,11 @@ const Topbar: FC = () => {
           <div className="text-xs text-text-muted font-mono">
             {format(time, 'dd MMM yyyy')}
           </div>
+        </div>
+
+        {/* LEDL Logo */}
+        <div className="border-l border-border pl-6 hidden sm:flex items-center">
+          <img src="/ledl.png" alt="LEDL" className="h-8 object-contain" />
         </div>
       </div>
     </header>
