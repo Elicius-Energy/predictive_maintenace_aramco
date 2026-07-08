@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useWebSocket } from '../contexts/WebSocketContext';
 import { useMachine } from '../contexts/MachineContext';
 import type { SensorReading, FeatureVector, MachineHealth, Alert, FaultDiagnosis } from '../types';
@@ -22,7 +22,7 @@ export const useSensorData = () => {
     setActiveAlerts([]);
   }, [activeMachine?.machine_id]);
 
-  const lastBucketRef = useRef<number>(0);
+
 
   useEffect(() => {
     return subscribe((message) => {
