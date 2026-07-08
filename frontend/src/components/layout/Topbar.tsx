@@ -19,7 +19,7 @@ function cn(...inputs: ClassValue[]) {
 }
 
 const Topbar: FC = () => {
-  const { activeMachine, machines, setActiveMachine, timeRange, setTimeRange } = useMachine();
+  const { activeMachine, machines, setActiveMachine, timeRange, setTimeRange, isAutoUpdate, setIsAutoUpdate } = useMachine();
   const { isConnected, activeAlerts, latestHealth } = useSensorData();
   const [time, setTime] = useState(new Date());
 
@@ -72,7 +72,8 @@ const Topbar: FC = () => {
               type="datetime-local" 
               value={timeRange.start}
               onChange={(e) => setTimeRange({ ...timeRange, start: e.target.value })}
-              className="bg-surface text-xs font-mono font-bold text-text-primary px-2 py-1 rounded border border-border focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-all"
+              className="bg-surface text-xs font-mono font-bold text-text-primary px-2 py-1 rounded border border-border focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-all disabled:opacity-50"
+              disabled={isAutoUpdate}
             />
           </div>
           <div className="w-px h-4 bg-border" />
@@ -82,9 +83,20 @@ const Topbar: FC = () => {
               type="datetime-local" 
               value={timeRange.end}
               onChange={(e) => setTimeRange({ ...timeRange, end: e.target.value })}
-              className="bg-surface text-xs font-mono font-bold text-text-primary px-2 py-1 rounded border border-border focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-all"
+              className="bg-surface text-xs font-mono font-bold text-text-primary px-2 py-1 rounded border border-border focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-all disabled:opacity-50"
+              disabled={isAutoUpdate}
             />
           </div>
+          <div className="w-px h-4 bg-border" />
+          <label className="flex items-center gap-1.5 cursor-pointer pl-1 pr-2">
+            <input
+              type="checkbox"
+              checked={isAutoUpdate}
+              onChange={(e) => setIsAutoUpdate(e.target.checked)}
+              className="w-3.5 h-3.5 text-primary rounded border-gray-300 focus:ring-primary/50"
+            />
+            <span className="text-[10px] text-primary font-bold uppercase tracking-wider">Auto</span>
+          </label>
         </div>
       </div>
 

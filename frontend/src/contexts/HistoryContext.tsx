@@ -3,6 +3,7 @@ import type { ReactNode, FC } from 'react';
 import api from '../utils/api';
 
 import { useMachine } from './MachineContext';
+import { useSensorData } from '../hooks/useSensorData';
 import type { FeatureVector } from '../types';
 
 interface HistoryContextType {
@@ -28,7 +29,8 @@ function toEpoch(ts: string): number {
 
 export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
 
-  const { activeMachine, timeRange } = useMachine();
+  const { activeMachine, timeRange, isAutoUpdate } = useMachine();
+  const { latestFeatures } = useSensorData();
 
   const [tempHistory, setTempHistory] = useState<any[]>([]);
   const [anomalyHistory, setAnomalyHistory] = useState<any[]>([]);
@@ -147,7 +149,57 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
     fetchHistory();
   }, [fetchHistory]);
 
-  // Live data appending removed per user request so that line charts only show data for the selected START/END periods.
+  // Live data appending
+  useEffect(() => {
+    if (!isAutoUpdate || !latestFeatures) return;
+
+    const f = latestFeatures as any;
+    const el = f.electrical || f.feature_data?.electrical || {};
+
+    setMechanicalHistory(prev => {
+      const newEntry = {
+        timestamp: f.timestamp,
+        ax: f.vibration?.rms_x || 0,
+        ay: f.vibration?.rms_y || 0,
+        az: f.vibration?.rms_z || 0,
+      };
+      return [...prev, newEntry].slice(-MAX_BUFFER);
+    });
+
+    setElectricalHistory(prev => {
+      const newEntry = {
+        timestamp: f.timestamp,
+        dTS: el.dTS || 0,
+        p: el.t_kw ?? el.active_power ?? 0,
+        kva: el.t_kva ?? el.apparent_power ?? 0,
+        i: el.i_avg ?? el.current ?? 0,
+        pf: el.pf_avg ?? el.power_factor ?? 0,
+        v1n: el.v1n || 0, v2n: el.v2n || 0, v3n: el.v3n || 0,
+        v12: el.v12 || 0, v23: el.v23 || 0, v31: el.v31 || 0,
+        i1: el.i1 || 0, i2: el.i2 || 0, i3: el.i3 || 0,
+        kw1: el.kw1 || 0, kw2: el.kw2 || 0, kw3: el.kw3 || 0,
+      };
+      return [...prev, newEntry].slice(-MAX_BUFFER);
+    });
+
+    setTempHistory(prev => {
+      const newEntry = {
+        timestamp: f.timestamp,
+        temperature: f.temperature || f.feature_data?.temperature || 0,
+      };
+      return [...prev, newEntry].slice(-MAX_BUFFER);
+    });
+
+    setAnomalyHistory(prev => {
+      const newEntry = {
+        timestamp: f.timestamp,
+        anomaly: (f.anomaly_score || f.feature_data?.anomaly_score || 0) * 100,
+        health: f.health_score || f.feature_data?.health_score || 0,
+      };
+      return [...prev, newEntry].slice(-MAX_BUFFER);
+    });
+
+  }, [latestFeatures, isAutoUpdate]);
 
   // Compute period energy and run time by trapezoid integration of active power over the time window
   const { periodEnergy, runTimeHours } = useMemo(() => {

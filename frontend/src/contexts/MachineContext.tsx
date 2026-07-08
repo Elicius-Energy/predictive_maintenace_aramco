@@ -11,6 +11,8 @@ interface MachineContextType {
   refreshMachines: () => Promise<void>;
   timeRange: { start: string; end: string };
   setTimeRange: (range: { start: string; end: string }) => void;
+  isAutoUpdate: boolean;
+  setIsAutoUpdate: (val: boolean) => void;
 }
 
 // Removed TIME_WINDOWS
@@ -32,6 +34,7 @@ export const MachineProvider: FC<{ children: ReactNode }> = ({ children }) => {
     start: formatDateTimeLocal(defaultStart),
     end: formatDateTimeLocal(now)
   });
+  const [isAutoUpdate, setIsAutoUpdate] = useState(false);
   const userSelectedRef = useRef(false);
 
   const handleSetActiveMachine = useCallback((machine: MachineInfo | null) => {
@@ -70,7 +73,9 @@ export const MachineProvider: FC<{ children: ReactNode }> = ({ children }) => {
       loading, 
       refreshMachines,
       timeRange,
-      setTimeRange
+      setTimeRange,
+      isAutoUpdate,
+      setIsAutoUpdate
     }}>
       {children}
     </MachineContext.Provider>
