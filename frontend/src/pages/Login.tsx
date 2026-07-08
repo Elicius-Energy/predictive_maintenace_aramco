@@ -59,12 +59,14 @@ const Login = () => {
       {/* Login Card */}
       <div className="relative z-10 bg-white p-10 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] w-full max-w-md border border-purple-100">
         <div className="flex flex-col items-center mb-10">
-          <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mb-4">
-            <Activity size={32} className="text-primary" />
+          <div className="flex items-center justify-center gap-6 mb-6">
+            <img src="/Elicius_Logo.png" alt="Elicius" className="h-12 object-contain" />
+            <div className="w-[1px] h-10 bg-gray-200" />
+            <img src="/ledl.png" alt="LEDL" className="h-12 object-contain" />
           </div>
           <h1 className="text-3xl font-extrabold text-gray-900 tracking-tight text-center">Elicius PDM App</h1>
           <p className="text-sm font-bold text-gray-400 mt-2 text-center uppercase tracking-widest">
-            Elicius Energy PVT LTD
+            Elicius Energy & LEDL
           </p>
         </div>
 

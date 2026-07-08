@@ -41,15 +41,23 @@ const Sidebar: FC = () => {
         {isExpanded ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
       </button>
 
-      {/* Branding — Elicius Logo */}
-      <div className={cn("py-7 border-b border-gray-100 flex flex-col items-center transition-all", isExpanded ? "px-6" : "px-2")}>
-        <img
-          src="/Elicius_Logo.png"
-          alt="Elicius"
-          className={cn("w-auto object-contain mb-2 transition-all", isExpanded ? "h-16" : "h-8")}
-        />
+      {/* Branding — Logos */}
+      <div className={cn("py-7 border-b border-gray-100 flex flex-col items-center transition-all", isExpanded ? "px-4" : "px-2")}>
+        <div className={cn("flex items-center justify-center transition-all", isExpanded ? "flex-row gap-3" : "flex-col gap-3")}>
+          <img
+            src="/Elicius_Logo.png"
+            alt="Elicius"
+            className={cn("w-auto object-contain transition-all", isExpanded ? "h-10" : "h-6")}
+          />
+          {isExpanded && <div className="w-[1px] h-8 bg-gray-200" />}
+          <img
+            src="/ledl.png"
+            alt="LEDL"
+            className={cn("w-auto object-contain transition-all", isExpanded ? "h-10" : "h-6")}
+          />
+        </div>
         {isExpanded && (
-          <p className="text-[11px] text-cyan-600 font-semibold tracking-[0.2em] uppercase whitespace-nowrap overflow-hidden">
+          <p className="text-[11px] text-cyan-600 font-semibold tracking-[0.2em] uppercase whitespace-nowrap overflow-hidden mt-3">
             PdM Dashboard
           </p>
         )}
