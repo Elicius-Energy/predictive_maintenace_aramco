@@ -35,6 +35,7 @@ const MotorDetailsForm: FC<MotorDetailsFormProps> = ({ onClose, onSuccess }) => 
     motorType: 'Induction Motor',
     manufacturer: '',
     ratedPower: 0,
+    ratedCurrent: 0,
     ratedSpeed: 0,
     ratedEfficiency: 0,
     motorPrice: 0,
@@ -90,6 +91,7 @@ const MotorDetailsForm: FC<MotorDetailsFormProps> = ({ onClose, onSuccess }) => 
           motorType: 'Induction Motor',
           manufacturer: '',
           ratedPower: 0,
+          ratedCurrent: 0,
           ratedSpeed: 0,
           ratedEfficiency: 0,
           motorPrice: 0,
@@ -103,7 +105,7 @@ const MotorDetailsForm: FC<MotorDetailsFormProps> = ({ onClose, onSuccess }) => 
     }
   };
 
-  const isValid = form.motorName.trim() !== '' && form.ratedPower > 0 && form.ratedSpeed > 0 && form.ratedEfficiency > 0;
+  const isValid = form.motorName.trim() !== '' && form.ratedPower > 0 && form.ratedCurrent > 0 && form.ratedSpeed > 0 && form.ratedEfficiency > 0;
 
   return (
     <div className="fixed inset-0 z-[100] bg-surface/95 backdrop-blur-sm overflow-y-auto font-sans py-10 px-4">
@@ -246,6 +248,22 @@ const MotorDetailsForm: FC<MotorDetailsFormProps> = ({ onClose, onSuccess }) => 
                   value={form.ratedPower || ''}
                   onChange={(e) => handleChange('ratedPower', parseFloat(e.target.value) || 0)}
                   placeholder="e.g. 7.5"
+                  className="w-full px-4 py-3 rounded-xl border border-border bg-surface focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary text-sm font-mono font-bold text-text-primary placeholder-text-muted transition-all"
+                  required
+                />
+              </div>
+              {/* Rated Current */}
+              <div>
+                <label className="block text-xs font-bold text-text-secondary uppercase tracking-wide mb-1.5">
+                  Rated Current (A) <span className="text-accent-red">*</span>
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value={form.ratedCurrent || ''}
+                  onChange={(e) => handleChange('ratedCurrent', parseFloat(e.target.value) || 0)}
+                  placeholder="e.g. 15.5"
                   className="w-full px-4 py-3 rounded-xl border border-border bg-surface focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary text-sm font-mono font-bold text-text-primary placeholder-text-muted transition-all"
                   required
                 />

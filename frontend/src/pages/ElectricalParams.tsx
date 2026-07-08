@@ -177,7 +177,7 @@ const ElectricalParams: FC = () => {
             </div>
           </div>
           <div className="mt-auto pt-3 border-t border-border flex items-center justify-between bg-surface/60 px-3 py-2 rounded-lg">
-            <span className="text-xs font-bold text-text-muted flex items-center gap-1"><Activity size={12}/> Freq</span>
+            <span className="text-xs font-bold text-text-muted flex items-center gap-1"><Activity size={12} /> Freq</span>
             <span className="text-lg font-mono font-extrabold text-emerald-600">{fmt(e?.frequency, 2)}<span className="text-[10px] ml-0.5">Hz</span></span>
           </div>
         </div>
@@ -260,7 +260,7 @@ const ElectricalParams: FC = () => {
         {/* Phasor Diagram + Currents */}
         <div className="industrial-card p-5 flex flex-col bg-gradient-to-b from-surface to-slate-50">
           <h3 className="text-xs uppercase font-extrabold tracking-wider text-text-muted mb-2 text-center flex items-center justify-center gap-1.5">
-            <ArrowUpDown size={14}/> Phasor Diagram
+            <ArrowUpDown size={14} /> Phasor Diagram
           </h3>
           <div className="flex-1 flex items-center justify-center min-h-[240px]">
             <PhasorDiagram v1={e?.v1n || 0} v2={e?.v2n || 0} v3={e?.v3n || 0} i1={e?.i1 || 0} i2={e?.i2 || 0} i3={e?.i3 || 0} />
@@ -287,7 +287,7 @@ const ElectricalParams: FC = () => {
         {/* Energy Counters & Max Demand */}
         <div className="industrial-card p-5 flex flex-col">
           <h3 className="text-xs uppercase font-extrabold tracking-wider text-text-muted mb-4 flex items-center gap-1.5">
-            <Bolt size={14}/> Energy & Demand
+            <Bolt size={14} /> Energy & Demand
           </h3>
           <div className="space-y-3 flex-1">
             {/* Lifetime Energy */}
@@ -341,12 +341,12 @@ const ElectricalParams: FC = () => {
       {/* ═══════════════ ROW 2.5 — Power Triangle ═══════════════ */}
       <div className="industrial-card p-5 flex flex-col bg-gradient-to-b from-surface to-violet-50/30">
         <h3 className="text-xs uppercase font-extrabold tracking-wider text-text-muted mb-4 text-center flex items-center justify-center gap-1.5">
-          <BarChart3 size={16}/> Power Triangle
+          <BarChart3 size={16} /> Power Triangle
         </h3>
         <div className="flex-1 flex items-center justify-center min-h-[350px]">
           <PowerTriangle kw={e?.t_kw || 0} kvar={e?.t_kvar || 0} kva={e?.t_kva || 0} />
         </div>
-        
+
         {/* Totals row (Centered) */}
         <div className="mt-6 pt-4 border-t border-border flex justify-center">
           <div className="grid grid-cols-4 gap-6 w-full max-w-3xl">
@@ -371,7 +371,7 @@ const ElectricalParams: FC = () => {
       <div className="industrial-card overflow-hidden">
         <div className="px-5 pt-5 pb-3">
           <h3 className="text-xs uppercase font-extrabold tracking-wider text-text-muted flex items-center gap-1.5">
-            <BarChart3 size={14}/> Per-Phase Power Breakdown
+            <BarChart3 size={14} /> Per-Phase Power Breakdown
           </h3>
         </div>
         <div className="overflow-x-auto">
@@ -444,17 +444,17 @@ const ElectricalParams: FC = () => {
             </div>
             {/* η actual */}
             <div className={`p-4 rounded-xl text-center border ${efficiencyCalc.gap > 5
-                ? 'bg-gradient-to-br from-red-50 to-red-100/40 border-red-200/60'
-                : efficiencyCalc.gap > 2
-                  ? 'bg-gradient-to-br from-amber-50 to-amber-100/40 border-amber-200/60'
-                  : 'bg-gradient-to-br from-cyan-50 to-cyan-100/40 border-cyan-200/60'
+              ? 'bg-gradient-to-br from-red-50 to-red-100/40 border-red-200/60'
+              : efficiencyCalc.gap > 2
+                ? 'bg-gradient-to-br from-amber-50 to-amber-100/40 border-amber-200/60'
+                : 'bg-gradient-to-br from-cyan-50 to-cyan-100/40 border-cyan-200/60'
               }`}>
               <p className="text-[10px] font-extrabold text-text-secondary uppercase tracking-wider mb-2">η Estimated</p>
               <p className={`text-2xl font-mono font-extrabold ${efficiencyCalc.gap > 5
-                  ? 'text-accent-red'
-                  : efficiencyCalc.gap > 2
-                    ? 'text-accent-amber'
-                    : 'text-primary'
+                ? 'text-accent-red'
+                : efficiencyCalc.gap > 2
+                  ? 'text-accent-amber'
+                  : 'text-primary'
                 }`}>{efficiencyCalc.etaActual.toFixed(1)}<span className="text-sm">%</span></p>
               <p className="text-[10px] text-text-muted mt-1 font-mono">P_in = {efficiencyCalc.pMeasured.toFixed(2)} kW</p>
             </div>
@@ -464,34 +464,32 @@ const ElectricalParams: FC = () => {
               <p className="text-2xl font-mono font-extrabold text-sky-600">{(efficiencyCalc.pOutW / 1000).toFixed(2)}<span className="text-sm"> kW</span></p>
             </div>
             {/* Load % */}
-            <div className={`p-4 rounded-xl text-center border ${
-              efficiencyCalc.loadPct > 115
+            <div className={`p-4 rounded-xl text-center border ${efficiencyCalc.loadPct > 115
                 ? 'bg-gradient-to-br from-red-50 to-red-100/40 border-red-200/60'
                 : efficiencyCalc.loadPct > 100
                   ? 'bg-gradient-to-br from-amber-50 to-amber-100/40 border-amber-200/60'
                   : 'bg-gradient-to-br from-violet-50 to-violet-100/40 border-violet-200/60'
               }`}>
               <p className="text-[10px] font-extrabold text-text-secondary uppercase tracking-wider mb-2">Load</p>
-              <p className={`text-2xl font-mono font-extrabold ${
-                efficiencyCalc.loadPct > 115 ? 'text-accent-red'
+              <p className={`text-2xl font-mono font-extrabold ${efficiencyCalc.loadPct > 115 ? 'text-accent-red'
                   : efficiencyCalc.loadPct > 100 ? 'text-accent-amber'
-                  : 'text-violet-600'
+                    : 'text-violet-600'
                 }`}>{efficiencyCalc.loadPct.toFixed(1)}<span className="text-sm">%</span></p>
               <p className="text-[10px] text-text-muted mt-1 font-mono">of 5.5 kW rated</p>
             </div>
             {/* Δη gap */}
             <div className={`p-4 rounded-xl text-center border ${efficiencyCalc.gap > 5
-                ? 'bg-gradient-to-br from-red-50 to-red-100/40 border-red-200/60'
-                : efficiencyCalc.gap > 2
-                  ? 'bg-gradient-to-br from-amber-50 to-amber-100/40 border-amber-200/60'
-                  : 'bg-gradient-to-br from-emerald-50 to-emerald-100/40 border-emerald-200/60'
+              ? 'bg-gradient-to-br from-red-50 to-red-100/40 border-red-200/60'
+              : efficiencyCalc.gap > 2
+                ? 'bg-gradient-to-br from-amber-50 to-amber-100/40 border-amber-200/60'
+                : 'bg-gradient-to-br from-emerald-50 to-emerald-100/40 border-emerald-200/60'
               }`}>
               <p className="text-[10px] font-extrabold text-text-secondary uppercase tracking-wider mb-2" title="Difference between rated and estimated efficiency">Δ Efficiency Gap</p>
               <p className={`text-2xl font-mono font-extrabold ${efficiencyCalc.gap > 5
-                  ? 'text-accent-red'
-                  : efficiencyCalc.gap > 2
-                    ? 'text-accent-amber'
-                    : 'text-accent-green'
+                ? 'text-accent-red'
+                : efficiencyCalc.gap > 2
+                  ? 'text-accent-amber'
+                  : 'text-accent-green'
                 }`}>{efficiencyCalc.gap > 0 ? '+' : ''}{efficiencyCalc.gap.toFixed(1)}<span className="text-sm"> pp</span></p>
               <p className="text-[10px] text-text-muted mt-1 font-mono">(Percentage Points)</p>
             </div>
@@ -643,7 +641,7 @@ const ElectricalParams: FC = () => {
       )}
 
       {showSetupModal && (
-        <MotorDetailsForm 
+        <MotorDetailsForm
           onClose={() => setShowSetupModal(false)}
           onSuccess={() => setShowSetupModal(false)}
         />

@@ -123,11 +123,20 @@ class OpenAIClient:
             else:
                 motor_config_block = "SELECTED ASSET — CONFIGURATION PROFILE:\n  No configuration profile has been saved for this device yet."
             
-            # 2c. Compute 24-hour historical duty cycle profile
+            # 2c. Compute historical duty cycle profile
             readings_24h = db.get_readings(resolved_id, minutes=24*60, limit=5000)
             if readings_24h:
                 total_samples = len(readings_24h)
                 readings_chrono = sorted(readings_24h, key=lambda x: x["timestamp"])
+                
+                # Calculate actual duration of data
+                try:
+                    from datetime import datetime
+                    first_ts = datetime.fromisoformat(readings_chrono[0]["timestamp"].replace("Z", "+00:00"))
+                    last_ts = datetime.fromisoformat(readings_chrono[-1]["timestamp"].replace("Z", "+00:00"))
+                    duration_hours = (last_ts - first_ts).total_seconds() / 3600
+                except:
+                    duration_hours = 0
                 
                 running_samples = []
                 cycles_count = 0
@@ -148,16 +157,26 @@ class OpenAIClient:
                 avg_power = sum(running_samples) / len(running_samples) if running_samples else 0
                 max_power = max(running_samples) if running_samples else 0
                 
+                # Optional: calculate power variance to determine if load is steady or highly variable
+                import math
+                if len(running_samples) > 1:
+                    variance = sum((x - avg_power) ** 2 for x in running_samples) / len(running_samples)
+                    std_dev = math.sqrt(variance)
+                    load_stability = "Steady / Constant" if std_dev < (0.1 * avg_power) else "Variable / Fluctuating"
+                else:
+                    load_stability = "Unknown"
+                
                 duty_cycle_block = (
-                    "SELECTED ASSET — 24-HOUR HISTORICAL PROFILE:\n"
-                    f"  - Data points analyzed: {total_samples} (past 24h)\n"
+                    "SELECTED ASSET — HISTORICAL PROFILE:\n"
+                    f"  - Data duration available: {duration_hours:.2f} hours ({total_samples} samples)\n"
                     f"  - Estimated Uptime: {uptime_pct:.1f}%\n"
-                    f"  - Start/Stop Cycles: {cycles_count}\n"
+                    f"  - Start/Stop Cycles in period: {cycles_count}\n"
                     f"  - Avg Active Power (when running): {avg_power:.2f} kW\n"
-                    f"  - Max Active Power observed: {max_power:.2f} kW"
+                    f"  - Max Active Power observed: {max_power:.2f} kW\n"
+                    f"  - Load Stability Pattern: {load_stability}"
                 )
             else:
-                duty_cycle_block = "SELECTED ASSET — 24-HOUR HISTORICAL PROFILE:\n  No historical data available for the past 24 hours."
+                duty_cycle_block = "SELECTED ASSET — HISTORICAL PROFILE:\n  No historical data available yet."
             
             # 3. Get cross-unit summary for ALL machines
             cross_unit_lines = []
@@ -232,7 +251,7 @@ Recent Alerts (past 30 minutes): {len(recent_alerts)} alert(s)
 3. **Show your reasoning.** When performing calculations (efficiency, load percentage, energy cost, payback period), show the key formula and intermediate steps so the engineer can verify.
 4. **Proactively identify concerns.** If you notice anomalies in the data (voltage deviation >10%, low power factor, high vibration kurtosis, thermal rise), flag them even if the user didn't ask.
 5. **Reference applicable standards** (IEC, IEEE, NEMA, ISO) when making recommendations about operating limits, vibration thresholds, or efficiency classifications.
-6. **For duty cycle questions**: Analyze the power consumption pattern over time. If historical data is limited, explain what pattern to look for and recommend the most likely IEC duty type based on the connected load type and current operating behavior.
+235. **For duty cycle questions**: Use the "Load Stability Pattern" and cycle count from the historical profile. For example, if the load is "Steady" with few cycles, it might be S1 (Continuous). If it is "Variable", it might be S6 or S9. Make a definitive educated guess based on the data you DO have, rather than complaining about limited data.
 7. **For efficiency questions**: Use the manufacturer's calibration curve (6-point PCHIP interpolation: 23%, 48%, 73%, 98%, 114%, 123% load) when available. Explain where the current operating point falls on this curve.
 8. **For ROI / payback questions**: Calculate annual energy consumption, compare with higher-efficiency alternatives, and provide simple payback period. Use the electricity cost from the configuration profile if available.
 9. **When comparing machines**: Use the FLEET OVERVIEW data to provide cross-unit analysis, identifying which units are performing best/worst and why.

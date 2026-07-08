@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import MotorDetailsSummary from '../common/MotorDetailsSummary';
+import ChatBotBubble from '../ai/ChatBotBubble';
 
 const Layout: FC = () => {
   return (
@@ -11,12 +12,15 @@ const Layout: FC = () => {
       <div className="flex-1 flex flex-col min-w-0">
         <Topbar />
         <main className="flex-1 overflow-y-auto p-6 bg-surface-muted">
-          <div className="max-w-[1600px] mx-auto min-h-full space-y-4">
+          <div className="max-w-[1600px] mx-auto h-full flex flex-col space-y-4">
             <MotorDetailsSummary />
-            <Outlet />
+            <div className="flex-1 min-h-0">
+              <Outlet />
+            </div>
           </div>
         </main>
       </div>
+      <ChatBotBubble />
     </div>
   );
 };

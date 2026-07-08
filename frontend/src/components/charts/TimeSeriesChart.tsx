@@ -8,7 +8,8 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend
+  Legend,
+  ReferenceLine
 } from 'recharts';
 
 interface DataPoint {
@@ -18,12 +19,13 @@ interface DataPoint {
 
 interface TimeSeriesChartProps {
   data: DataPoint[];
-  lines: { key: string; color: string; name: string }[];
+  lines: { key: string; color: string; name: string; dashed?: boolean }[];
   yDomain?: [number | string, number | string];
   title?: string;
+  threshold?: { value: number; label: string; color: string };
 }
 
-const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ data, lines, yDomain, title }) => {
+const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ data, lines, yDomain, title, threshold }) => {
   // Memoize the expensive map + sort so it only re-computes when data changes
   const processedData = useMemo(() => {
     return data.map(d => {
@@ -100,8 +102,18 @@ const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ data, lines, yDomain, title
                 connectNulls={true}
                 isAnimationActive={false}
                 animationDuration={0}
+                strokeDasharray={line.dashed ? '5 5' : undefined}
               />
             ))}
+            {threshold && (
+              <ReferenceLine
+                y={threshold.value}
+                label={{ position: 'top', value: threshold.label, fill: threshold.color, fontSize: 10, fontWeight: 'bold' }}
+                stroke={threshold.color}
+                strokeDasharray="3 3"
+                strokeWidth={2}
+              />
+            )}
           </LineChart>
         </ResponsiveContainer>
       </div>

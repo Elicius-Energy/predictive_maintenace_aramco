@@ -5,9 +5,6 @@ import { useAuth } from '../../contexts/AuthContext';
 import {
   LayoutDashboard,
   Activity,
-  Zap,
-  Settings2,
-  BrainCircuit,
   LogOut,
   ChevronLeft,
   ChevronRight
@@ -21,10 +18,7 @@ function cn(...inputs: ClassValue[]) {
 
 const navItems = [
   { path: '/machines', name: 'Asset Selector', icon: LayoutDashboard },
-  { path: '/dashboard/mechanical', name: 'Mechanical Params', icon: Activity },
-  { path: '/dashboard/electrical', name: 'Electrical Params', icon: Zap },
-  { path: '/dashboard/other', name: 'Auxiliary Metrics', icon: Settings2 },
-  { path: '/dashboard/ai-analysis', name: 'AI Analysis & RAG', icon: BrainCircuit },
+  { path: '/dashboard', name: 'Dashboard Overview', icon: Activity },
 ];
 
 const Sidebar: FC = () => {
@@ -75,6 +69,7 @@ const Sidebar: FC = () => {
                 ? "bg-cyan-50 text-cyan-700 font-semibold shadow-sm border border-cyan-100"
                 : "text-gray-500 hover:text-gray-800 hover:bg-gray-50"
             )}
+            end // Add end prop to NavLink so /dashboard doesn't stay active on other subpaths if any
           >
             <item.icon size={isExpanded ? 22 : 24} className={cn("transition-colors flex-shrink-0", "group-hover:text-cyan-600")} />
             {isExpanded && <span className="text-sm font-medium whitespace-nowrap">{item.name}</span>}

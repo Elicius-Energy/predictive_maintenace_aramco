@@ -10,6 +10,7 @@ export interface MotorDetails {
   motorType: 'Induction Motor' | 'SynRM';
   manufacturer: string;
   ratedPower: number;       // kW
+  ratedCurrent: number;     // A
   ratedSpeed: number;       // RPM
   ratedEfficiency: number;  // %
   motorPrice: number;       // currency
@@ -88,6 +89,7 @@ export const MotorDetailsProvider: FC<{ children: ReactNode }> = ({ children }) 
   const isMotorConfigured = motorDetails !== null &&
     motorDetails.motorName.trim() !== '' &&
     motorDetails.ratedPower > 0 &&
+    motorDetails.ratedCurrent > 0 &&
     motorDetails.ratedSpeed > 0 &&
     motorDetails.ratedEfficiency > 0;
 

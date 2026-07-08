@@ -13,6 +13,7 @@ interface HistoryContextType {
   latestHistoricalFeatures: FeatureVector | null;
   isFetching: boolean;
   periodEnergy: number; // kWh integrated over selected time window
+  runTimeHours: number; // hours motor was running over selected time window
 }
 
 const HistoryContext = createContext<HistoryContextType | undefined>(undefined);
@@ -148,10 +149,11 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
 
   // Live data appending removed per user request so that line charts only show data for the selected START/END periods.
 
-  // Compute period energy by trapezoid integration of active power over the time window
-  const periodEnergy = useMemo(() => {
-    if (electricalHistory.length < 2) return 0;
+  // Compute period energy and run time by trapezoid integration of active power over the time window
+  const { periodEnergy, runTimeHours } = useMemo(() => {
+    if (electricalHistory.length < 2) return { periodEnergy: 0, runTimeHours: 0 };
     let totalKwh = 0;
+    let runTime = 0;
     for (let i = 1; i < electricalHistory.length; i++) {
       const p0 = electricalHistory[i - 1].p || 0; // active power in kW
       const p1 = electricalHistory[i].p || 0;
@@ -160,9 +162,13 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
       const dtHours = (t1 - t0) / 3600000; // ms → hours
       if (dtHours > 0 && dtHours < 1) { // skip gaps > 1 hour
         totalKwh += ((p0 + p1) / 2) * dtHours;
+        // Motor is considered running if active power > 0.05 kW
+        if (p0 > 0.05 || p1 > 0.05) {
+          runTime += dtHours;
+        }
       }
     }
-    return Math.abs(totalKwh);
+    return { periodEnergy: Math.abs(totalKwh), runTimeHours: runTime };
   }, [electricalHistory]);
 
   return (
@@ -173,7 +179,8 @@ export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {
       electricalHistory,
       latestHistoricalFeatures,
       isFetching,
-      periodEnergy
+      periodEnergy,
+      runTimeHours
     }}>
       {children}
     </HistoryContext.Provider>

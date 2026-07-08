@@ -10,10 +10,7 @@ import Layout from './components/layout/Layout';
 
 // Real Pages
 import MachineSelection from './pages/MachineSelection';
-import MechanicalParams from './pages/MechanicalParams';
-import ElectricalParams from './pages/ElectricalParams';
-import OtherParams from './pages/OtherParams';
-import AIAnalysis from './pages/AIAnalysis';
+import DashboardOverview from './pages/DashboardOverview';
 
 import Login from './pages/Login';
 
@@ -51,12 +48,10 @@ const App: FC = () => {
                     <Route path="/" element={<ProtectedRoute><RootRedirect /></ProtectedRoute>} />
                     <Route path="/machines" element={<ProtectedRoute><MachineSelection /></ProtectedRoute>} />
                     <Route path="/dashboard" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-                      <Route index element={<MechanicalParams />} />
-                      <Route path="mechanical" element={<MechanicalParams />} />
-                      <Route path="electrical" element={<ElectricalParams />} />
-                      <Route path="other" element={<OtherParams />} />
-                      <Route path="ai-analysis" element={<AIAnalysis />} />
+                      <Route index element={<DashboardOverview />} />
+                      <Route path="*" element={<Navigate to="/dashboard" replace />} />
                     </Route>
+                    <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </BrowserRouter>
               </ChatProvider>
