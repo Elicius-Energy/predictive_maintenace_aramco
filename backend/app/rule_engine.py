@@ -35,10 +35,21 @@ class RuleEngine:
             alerts.append(self._create_alert("BEARING_FAULT_WARNING", "Early bearing wear detected", Severity.WARNING, max(mv.kurtosis_x, mv.kurtosis_y), 4.0))
 
         # 3. Electrical Anomalies
-        if me.voltage > 460: # 415V nominal
-            alerts.append(self._create_alert("OVERVOLTAGE", f"Overvoltage detected: {me.voltage:.1f}V", Severity.WARNING, me.voltage, 460.0))
-        elif me.voltage < 370:
-            alerts.append(self._create_alert("UNDERVOLTAGE", f"Undervoltage detected: {me.voltage:.1f}V", Severity.WARNING, me.voltage, 370.0))
+        if me.is_three_phase:
+            v_check = me.vll_avg if me.vll_avg > 0 else (me.voltage * 1.732)
+            over_limit = 460.0
+            under_limit = 370.0
+            v_label = "L-L"
+        else:
+            v_check = me.voltage
+            over_limit = 250.0
+            under_limit = 200.0
+            v_label = "L-N"
+
+        if v_check > over_limit:
+            alerts.append(self._create_alert("OVERVOLTAGE", f"Overvoltage detected: {v_check:.1f}V {v_label}", Severity.WARNING, v_check, over_limit))
+        elif v_check > 50 and v_check < under_limit:
+            alerts.append(self._create_alert("UNDERVOLTAGE", f"Undervoltage detected: {v_check:.1f}V {v_label}", Severity.WARNING, v_check, under_limit))
             
         if me.power_factor < 0.7 and me.load_percentage > 50:
             alerts.append(self._create_alert("LOW_POWER_FACTOR", f"Inefficient power factor: {me.power_factor:.2f}", Severity.WARNING, me.power_factor, 0.7))
