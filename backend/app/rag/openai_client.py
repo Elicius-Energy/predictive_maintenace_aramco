@@ -115,6 +115,19 @@ class OpenAIClient:
             latest_features = db.get_features(resolved_id, minutes=1)
             recent_alerts = db.get_alerts(resolved_id, minutes=30)
             
+            # Clean massive FFT arrays from features before sending to LLM
+            latest_features_str = 'No feature data available yet.'
+            if latest_features:
+                import copy
+                clean_feat = copy.deepcopy(latest_features[0])
+                if "feature_data" in clean_feat and isinstance(clean_feat["feature_data"], dict):
+                    fd = clean_feat["feature_data"]
+                    if "vibration" in fd and isinstance(fd["vibration"], dict):
+                        vib = fd["vibration"]
+                        vib.pop("fft_magnitudes", None)
+                        vib.pop("fft_frequencies", None)
+                latest_features_str = str(clean_feat)
+            
             # 2b. Get static motor configuration for the ACTIVE machine
             motor_config = db.get_motor_config(resolved_id)
             if motor_config:
@@ -231,7 +244,7 @@ Latest Sensor Reading:
 {latest_reading}
 
 Latest Computed Features:
-{latest_features[0] if latest_features else 'No feature data available yet.'}
+{latest_features_str}
 
 Recent Alerts (past 30 minutes): {len(recent_alerts)} alert(s)
 {chr(10).join(f'  - [{a.get("severity","?")}] {a.get("message","")}' for a in recent_alerts[:5]) if recent_alerts else '  No recent alerts.'}
