@@ -25,7 +25,6 @@
 
 @layer base {
   :root {
-    background-color: #f8fafc;
     color: #0f172a;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
   }
@@ -33,15 +32,83 @@
 
 @layer base {
   body {
-    @apply bg-surface-alt text-text-primary overflow-x-hidden;
+    @apply text-text-primary overflow-x-hidden;
+    background: linear-gradient(135deg, #e0e7ff 0%, #f0f9ff 25%, #f8fafc 50%, #ecfdf5 75%, #ede9fe 100%);
+    background-attachment: fixed;
+    min-height: 100vh;
   }
 }
 
 @layer components {
+  /* ─── Frosted Glass Card (macOS-style) ─── */
   .industrial-card {
-    @apply bg-surface border border-border rounded-xl shadow-sm;
+    background: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    border-radius: 16px;
+    box-shadow:
+      0 4px 24px -4px rgba(0, 0, 0, 0.06),
+      0 1px 2px rgba(0, 0, 0, 0.04),
+      inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    transition: box-shadow 0.3s ease, transform 0.2s ease;
   }
-  
+
+  .industrial-card:hover {
+    box-shadow:
+      0 8px 32px -4px rgba(0, 0, 0, 0.10),
+      0 2px 4px rgba(0, 0, 0, 0.05),
+      inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  }
+
+  /* ─── Glass Sidebar ─── */
+  .glass-sidebar {
+    background: rgba(255, 255, 255, 0.45);
+    backdrop-filter: blur(24px) saturate(200%);
+    -webkit-backdrop-filter: blur(24px) saturate(200%);
+    border-right: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow:
+      4px 0 24px -4px rgba(0, 0, 0, 0.06),
+      inset -1px 0 0 rgba(255, 255, 255, 0.6);
+  }
+
+  /* ─── Glass Topbar ─── */
+  .glass-topbar {
+    background: rgba(255, 255, 255, 0.50);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow:
+      0 4px 16px -4px rgba(0, 0, 0, 0.05),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.6);
+  }
+
+  /* ─── Glassmorphic Input ─── */
+  .glass-input {
+    background: rgba(255, 255, 255, 0.5);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
+    transition: all 0.2s ease;
+  }
+
+  .glass-input:focus {
+    background: rgba(255, 255, 255, 0.7);
+    border-color: rgba(8, 145, 178, 0.4);
+    box-shadow:
+      inset 0 1px 2px rgba(0, 0, 0, 0.04),
+      0 0 0 3px rgba(8, 145, 178, 0.1);
+  }
+
+  /* ─── Glass Badge ─── */
+  .glass-badge {
+    background: rgba(255, 255, 255, 0.4);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+  }
+
   .status-healthy {
     @apply text-accent-green;
   }
@@ -65,8 +132,13 @@
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  @apply bg-surface-alt;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  @apply bg-border rounded-full hover:bg-text-muted transition-colors;
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 9999px;
+  transition: background 0.2s;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.6);
 }

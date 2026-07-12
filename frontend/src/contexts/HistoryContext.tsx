@@ -22,9 +22,11 @@ const HistoryContext = createContext<HistoryContextType | undefined>(undefined);
 // Max data points kept per history array
 const MAX_BUFFER = 500;
 
-/** Parse a timestamp string to epoch ms, handling optional trailing Z */
+/** Parse a timestamp string to epoch ms, handling optional trailing Z and timezone offsets */
 function toEpoch(ts: string): number {
-  return new Date(ts.endsWith('Z') ? ts : ts + 'Z').getTime();
+  if (!ts) return 0;
+  const tzTs = (ts.endsWith('Z') || ts.includes('+')) ? ts : ts + 'Z';
+  return new Date(tzTs).getTime();
 }
 
 export const HistoryProvider: FC<{ children: ReactNode }> = ({ children }) => {

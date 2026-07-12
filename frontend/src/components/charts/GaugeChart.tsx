@@ -47,7 +47,7 @@ const GaugeChart: FC<GaugeChartProps> = ({ value, min, max, unit, label, thresho
           cy="50"
           r={radius}
           fill="transparent"
-          stroke="#e2e8f0"
+          stroke="rgba(148, 163, 184, 0.25)"
           strokeWidth="7"
           strokeDasharray={`${(span / 360) * circumference} ${circumference}`}
           strokeDashoffset="0"
@@ -66,7 +66,11 @@ const GaugeChart: FC<GaugeChartProps> = ({ value, min, max, unit, label, thresho
           strokeDashoffset={offset}
           strokeLinecap="round"
           className="transition-all duration-1000 ease-out"
-          style={{ transform: `rotate(${rotation}deg)`, transformOrigin: '50% 50%' }}
+          style={{ 
+            transform: `rotate(${rotation}deg)`, 
+            transformOrigin: '50% 50%',
+            filter: `drop-shadow(0 0 6px ${strokeColor}40)`
+          }}
         />
       </svg>
       

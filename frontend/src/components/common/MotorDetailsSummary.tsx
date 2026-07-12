@@ -14,10 +14,10 @@ const MotorDetailsSummary: FC = () => {
       {/* Collapsed header — always visible */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between px-5 py-3 hover:bg-surface-muted transition-colors"
+        className="w-full flex items-center justify-between px-5 py-3 hover:bg-white/30 transition-colors"
       >
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+          <div className="w-8 h-8 rounded-lg bg-primary/15 backdrop-blur-sm flex items-center justify-center">
             <Cpu size={16} className="text-primary" />
           </div>
           <div className="text-left">
@@ -28,7 +28,7 @@ const MotorDetailsSummary: FC = () => {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-[10px] text-primary font-bold uppercase tracking-wider bg-primary/10 px-2 py-0.5 rounded">
+          <span className="text-[10px] text-primary font-bold uppercase tracking-wider glass-badge px-2 py-0.5 rounded">
             Configured
           </span>
           {isExpanded ? (
@@ -41,28 +41,28 @@ const MotorDetailsSummary: FC = () => {
 
       {/* Expanded details */}
       {isExpanded && (
-        <div className="px-5 pb-4 pt-2 border-t border-border bg-surface-muted/50 space-y-3">
+        <div className="px-5 pb-4 pt-2 border-t border-white/30 bg-white/20 space-y-3">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="p-3 rounded-lg bg-surface border border-border">
+            <div className="p-3 rounded-xl bg-white/40 backdrop-blur-sm border border-white/50">
               <p className="text-[9px] font-bold text-text-muted uppercase tracking-wider">Motor Type</p>
               <p className="text-sm font-bold text-text-primary mt-0.5">{motorDetails.motorType}</p>
             </div>
-            <div className="p-3 rounded-lg bg-surface border border-border">
+            <div className="p-3 rounded-xl bg-white/40 backdrop-blur-sm border border-white/50">
               <p className="text-[9px] font-bold text-text-muted uppercase tracking-wider">Rated Power</p>
               <p className="text-sm font-mono font-bold text-text-primary mt-0.5">{motorDetails.ratedPower} kW</p>
             </div>
-            <div className="p-3 rounded-lg bg-surface border border-border">
+            <div className="p-3 rounded-xl bg-white/40 backdrop-blur-sm border border-white/50">
               <p className="text-[9px] font-bold text-text-muted uppercase tracking-wider">Rated η</p>
               <p className="text-sm font-mono font-bold text-primary mt-0.5">{motorDetails.ratedEfficiency}%</p>
             </div>
-            <div className="p-3 rounded-lg bg-surface border border-border">
+            <div className="p-3 rounded-xl bg-white/40 backdrop-blur-sm border border-white/50">
               <p className="text-[9px] font-bold text-text-muted uppercase tracking-wider">Motor Price</p>
               <p className="text-sm font-mono font-bold text-text-primary mt-0.5">₹{motorDetails.motorPrice.toLocaleString()}</p>
             </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {motorDetails.location && (
-              <div className="p-3 rounded-lg bg-surface border border-border">
+              <div className="p-3 rounded-xl bg-white/40 backdrop-blur-sm border border-white/50">
                 <p className="text-[9px] font-bold text-text-muted uppercase tracking-wider flex items-center gap-1">
                   <MapPin size={9} /> Location
                 </p>
@@ -70,19 +70,19 @@ const MotorDetailsSummary: FC = () => {
               </div>
             )}
             {motorDetails.connectedLoad && (
-              <div className="p-3 rounded-lg bg-surface border border-border">
+              <div className="p-3 rounded-xl bg-white/40 backdrop-blur-sm border border-white/50">
                 <p className="text-[9px] font-bold text-text-muted uppercase tracking-wider">Connected Load</p>
                 <p className="text-sm font-medium text-text-primary mt-0.5">{motorDetails.connectedLoad}</p>
               </div>
             )}
             {motorDetails.manufacturer && (
-              <div className="p-3 rounded-lg bg-surface border border-border">
+              <div className="p-3 rounded-xl bg-white/40 backdrop-blur-sm border border-white/50">
                 <p className="text-[9px] font-bold text-text-muted uppercase tracking-wider">Manufacturer</p>
                 <p className="text-sm font-medium text-text-primary mt-0.5">{motorDetails.manufacturer}</p>
               </div>
             )}
             {motorDetails.electricityCost > 0 && (
-              <div className="p-3 rounded-lg bg-surface border border-border">
+              <div className="p-3 rounded-xl bg-white/40 backdrop-blur-sm border border-white/50">
                 <p className="text-[9px] font-bold text-text-muted uppercase tracking-wider flex items-center gap-1">
                   <Zap size={9} /> Elec. Cost
                 </p>

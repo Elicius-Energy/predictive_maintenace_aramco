@@ -32,25 +32,24 @@ const Sidebar: FC = () => {
     <>
       <aside
         className={cn(
-          "h-full flex flex-col relative z-50 shadow-lg border-r border-gray-100 transition-all duration-300",
-        isExpanded ? "w-72" : "w-[88px]"
-      )}
-      style={{ background: '#ffffff' }}
-    >
+          "h-full flex flex-col relative z-50 glass-sidebar transition-all duration-300",
+          isExpanded ? "w-72" : "w-[88px]"
+        )}
+      >
       {/* Toggle Button */}
       <button 
         onClick={() => setIsExpanded(!isExpanded)}
-        className="absolute -right-3 top-6 bg-white border border-gray-200 rounded-full p-1 shadow-sm text-gray-500 hover:text-cyan-600 z-50 transition-colors"
+        className="absolute -right-3 top-6 bg-white/70 backdrop-blur-md border border-white/50 rounded-full p-1 shadow-lg text-gray-500 hover:text-cyan-600 z-50 transition-all hover:scale-110"
       >
         {isExpanded ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
       </button>
 
       {/* Branding — Elicius Logo */}
-      <div className={cn("py-7 border-b border-gray-100 flex flex-col items-center transition-all", isExpanded ? "px-6" : "px-2")}>
+      <div className={cn("py-7 border-b border-white/30 flex flex-col items-center transition-all", isExpanded ? "px-6" : "px-2")}>
         <img
           src="/Elicius_Logo.png"
           alt="Elicius"
-          className={cn("w-auto object-contain mb-2 transition-all", isExpanded ? "h-16" : "h-8")}
+          className={cn("w-auto object-contain mb-2 transition-all drop-shadow-sm", isExpanded ? "h-16" : "h-8")}
         />
         {isExpanded && (
           <p className="text-[11px] text-cyan-600 font-semibold tracking-[0.2em] uppercase whitespace-nowrap overflow-hidden">
@@ -70,10 +69,10 @@ const Sidebar: FC = () => {
               "flex items-center rounded-xl transition-all duration-200 group",
               isExpanded ? "gap-3 px-4 py-3.5" : "justify-center py-3 px-0",
               isActive
-                ? "bg-cyan-50 text-cyan-700 font-semibold shadow-sm border border-cyan-100"
-                : "text-gray-500 hover:text-gray-800 hover:bg-gray-50"
+                ? "bg-cyan-500/15 text-cyan-700 font-semibold shadow-sm border border-cyan-200/40 backdrop-blur-sm"
+                : "text-gray-600 hover:text-gray-800 hover:bg-white/40"
             )}
-            end // Add end prop to NavLink so /dashboard doesn't stay active on other subpaths if any
+            end
           >
             <item.icon size={isExpanded ? 22 : 24} className={cn("transition-colors flex-shrink-0", "group-hover:text-cyan-600")} />
             {isExpanded && <span className="text-sm font-medium whitespace-nowrap">{item.name}</span>}
@@ -82,25 +81,25 @@ const Sidebar: FC = () => {
       </nav>
 
       {/* Status Bar Section */}
-      <div className={cn("p-4 border-t border-gray-100 space-y-4", !isExpanded && "items-center flex flex-col px-2")}>
+      <div className={cn("p-4 border-t border-white/30 space-y-4", !isExpanded && "items-center flex flex-col px-2")}>
         {isExpanded ? (
-          <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
+          <div className="bg-white/30 backdrop-blur-sm p-4 rounded-xl border border-white/40">
             <div className="flex justify-between items-center mb-2">
-              <span className="text-[11px] text-gray-400 uppercase tracking-wider font-semibold">System Status</span>
-              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-[11px] text-gray-500 uppercase tracking-wider font-semibold">System Status</span>
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shadow-lg shadow-emerald-500/40" />
             </div>
             <p className="text-xs text-gray-600 font-mono">MQTT: CONNECTED</p>
             <p className="text-xs text-gray-600 font-mono">SAMPLING: 1Hz</p>
           </div>
         ) : (
-          <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse mt-2" title="System Status: Connected" />
+          <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse shadow-lg shadow-emerald-500/40 mt-2" title="System Status: Connected" />
         )}
 
         <button
           onClick={() => setShowMotorConfig(true)}
           title={!isExpanded ? "Motor Configuration" : undefined}
           className={cn(
-            "flex items-center justify-center text-gray-500 hover:text-cyan-600 hover:bg-cyan-50 rounded-xl transition-all",
+            "flex items-center justify-center text-gray-500 hover:text-cyan-600 hover:bg-white/40 rounded-xl transition-all",
             isExpanded ? "w-full gap-2 px-4 py-2.5" : "w-10 h-10 p-0"
           )}
         >
@@ -115,7 +114,7 @@ const Sidebar: FC = () => {
           }}
           title={!isExpanded ? "Sign Out" : undefined}
           className={cn(
-            "flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all",
+            "flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50/40 rounded-xl transition-all",
             isExpanded ? "w-full gap-2 px-4 py-2.5" : "w-10 h-10 p-0"
           )}
         >

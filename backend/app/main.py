@@ -31,7 +31,7 @@ from app.ml_engine import ml_engine
 from app.rag.openai_client import ai_client
 from app.rag.embeddings import embedding_manager
 
-from app.routes import data, ws, rag, auth
+from app.routes import data, ws, rag, auth, reports
 from app.middleware import RequestIDMiddleware, RequestLoggingMiddleware
 
 limiter = Limiter(key_func=get_remote_address)
@@ -104,6 +104,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api")
 app.include_router(data.router, prefix="/api")
 app.include_router(rag.router, prefix="/api")
+app.include_router(reports.router, prefix="/api/reports")
 app.include_router(ws.router)
 
 # ── Data Processing Pipeline ──────────────────────────────────────────────

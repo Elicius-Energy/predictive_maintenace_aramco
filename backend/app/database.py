@@ -235,23 +235,30 @@ class Database:
     def get_features(self, machine_id: str = "LEDL_Demo",
                      minutes: int = 10, limit: int = 2000,
                      start_time: Optional[str] = None, end_time: Optional[str] = None) -> List[Dict]:
-        """Get recent computed features with adaptive sampling."""
+        """Get recent computed features with adaptive sampling based on actual data density."""
         if start_time and end_time:
             since = start_time
             until = end_time
+            # Ensure proper timezone formats
             try:
-                st = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-                et = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
-                diff_mins = (et - st).total_seconds() / 60
-                nth = max(1, int((diff_mins * 6) // 100)) if diff_mins > 30 else 1
+                datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+                datetime.fromisoformat(end_time.replace("Z", "+00:00"))
             except ValueError:
-                nth = 1
+                pass
         else:
             until = datetime.now(timezone.utc).isoformat()
             since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
-            nth = max(1, (minutes * 6) // 100) if minutes > 30 else 1
             
         with self._get_conn() as conn:
+            # First, get the actual count of rows in this time window
+            count = conn.execute(
+                "SELECT count(*) FROM features WHERE machine_id = ? AND timestamp >= ? AND timestamp <= ?", 
+                (machine_id, since, until)
+            ).fetchone()[0]
+            
+            # Dynamically calculate nth based on actual rows to ensure we never over-sample sparse data
+            nth = max(1, count // limit)
+            
             query = f"""
                 SELECT * FROM (
                     SELECT *, ROW_NUMBER() OVER (ORDER BY timestamp DESC) as rn 
