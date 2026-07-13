@@ -26,6 +26,7 @@ const Topbar: FC = () => {
   const { activeMachine, machines, setActiveMachine, timeRange, setTimeRange, isAutoUpdate, setIsAutoUpdate } = useMachine();
   const { isConnected, activeAlerts, latestHealth } = useSensorData();
   const [time, setTime] = useState(new Date());
+  const [csvResolution, setCsvResolution] = useState('raw');
   
   const { isGenerating, generateReport } = useReportGenerator();
 
@@ -105,32 +106,46 @@ const Topbar: FC = () => {
           </label>
           <div className="w-px h-4 bg-white/40" />
           
-          {/* Action Buttons */}
-          <button 
-            onClick={async () => {
-              if (activeMachine) {
-                try {
-                  const url = `/api/data/download_csv?machine_id=${activeMachine.machine_id}&start_time=${timeRange.start}:00.000Z&end_time=${timeRange.end}:00.000Z`;
-                  const response = await api.get(url, { responseType: 'blob' });
-                  const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
-                  const link = document.createElement('a');
-                  link.href = blobUrl;
-                  link.setAttribute('download', `export_${activeMachine.machine_id}.csv`);
-                  document.body.appendChild(link);
-                  link.click();
-                  link.parentNode?.removeChild(link);
-                } catch (e) {
-                  console.error('CSV download error:', e);
-                  alert('Failed to download CSV');
+          <div className="flex items-center gap-2">
+            <select
+              value={csvResolution}
+              onChange={(e) => setCsvResolution(e.target.value)}
+              className="glass-input text-xs font-mono font-bold text-text-primary px-2 py-1 rounded-lg focus:outline-none"
+            >
+              <option value="raw">Raw</option>
+              <option value="1m">1 Min</option>
+              <option value="5m">5 Min</option>
+              <option value="15m">15 Min</option>
+              <option value="1h">1 Hour</option>
+            </select>
+            <button 
+              onClick={async () => {
+                if (activeMachine) {
+                  try {
+                    const startUtc = new Date(timeRange.start).toISOString();
+                    const endUtc = new Date(timeRange.end).toISOString();
+                    const url = `/api/data/download_csv?machine_id=${activeMachine.machine_id}&start_time=${startUtc}&end_time=${endUtc}&resolution=${csvResolution}`;
+                    const response = await api.get(url, { responseType: 'blob' });
+                    const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
+                    const link = document.createElement('a');
+                    link.href = blobUrl;
+                    link.setAttribute('download', `export_${activeMachine.machine_id}.csv`);
+                    document.body.appendChild(link);
+                    link.click();
+                    link.parentNode?.removeChild(link);
+                  } catch (e) {
+                    console.error('CSV download error:', e);
+                    alert('Failed to download CSV');
+                  }
                 }
-              }
-            }}
-            className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-white/40 transition-colors border border-transparent hover:border-white/50 text-text-secondary hover:text-primary"
-            title="Download CSV"
-          >
-            <Download size={14} />
-            <span className="text-[10px] font-bold uppercase tracking-wider hidden sm:inline">CSV</span>
-          </button>
+              }}
+              className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-white/40 transition-colors border border-transparent hover:border-white/50 text-text-secondary hover:text-primary"
+              title="Download CSV"
+            >
+              <Download size={14} />
+              <span className="text-[10px] font-bold uppercase tracking-wider hidden sm:inline">CSV</span>
+            </button>
+          </div>
           
           <button 
             onClick={generateReport}

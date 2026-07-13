@@ -24,7 +24,7 @@ export const MachineProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const [machines, setMachines] = useState<MachineInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const now = new Date();
-  const defaultStart = new Date(now.getTime() - 5 * 60000);
+  const defaultStart = new Date(now.getTime() - 60 * 60000);
   const formatDateTimeLocal = (d: Date) => {
     const pad = (n: number) => n.toString().padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;

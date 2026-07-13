@@ -13,6 +13,18 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+def get_iso_bound(time_str: Optional[str], is_end: bool = False) -> Optional[str]:
+    """Format an ISO time string into a safe lower or upper bound for SQLite string comparison."""
+    if not time_str:
+        return time_str
+    try:
+        dt = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+        dt = dt.astimezone(timezone.utc)
+        base = dt.strftime("%Y-%m-%dT%H:%M:%S")
+        return base + "~" if is_end else base + "+00:00"
+    except Exception:
+        return time_str
+
 
 class Database:
     """SQLite database for time-series sensor data storage."""
@@ -206,21 +218,22 @@ class Database:
                      start_time: Optional[str] = None, end_time: Optional[str] = None) -> List[Dict]:
         """Get recent sensor readings with adaptive sampling."""
         if start_time and end_time:
-            since = start_time
-            until = end_time
-            try:
-                st = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-                et = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
-                diff_mins = (et - st).total_seconds() / 60
-                nth = max(1, int((diff_mins * 60) // 1000)) if diff_mins > 30 else 1
-            except ValueError:
-                nth = 1
+            since = get_iso_bound(start_time, is_end=False)
+            until = get_iso_bound(end_time, is_end=True)
         else:
             until = datetime.now(timezone.utc).isoformat()
             since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
-            nth = max(1, (minutes * 60) // 1000) if minutes > 30 else 1
             
         with self._get_conn() as conn:
+            # First, get the actual count of rows in this time window
+            count = conn.execute(
+                "SELECT count(*) FROM sensor_readings WHERE machine_id = ? AND timestamp >= ? AND timestamp <= ?", 
+                (machine_id, since, until)
+            ).fetchone()[0]
+            
+            # Dynamically calculate nth based on actual rows to ensure we never over-sample sparse data
+            nth = max(1, count // limit)
+            
             query = f"""
                 SELECT * FROM (
                     SELECT *, ROW_NUMBER() OVER (ORDER BY timestamp DESC) as rn 
@@ -237,12 +250,12 @@ class Database:
                      start_time: Optional[str] = None, end_time: Optional[str] = None) -> List[Dict]:
         """Get recent computed features with adaptive sampling based on actual data density."""
         if start_time and end_time:
-            since = start_time
-            until = end_time
+            since = get_iso_bound(start_time, is_end=False)
+            until = get_iso_bound(end_time, is_end=True)
             # Ensure proper timezone formats
             try:
-                datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-                datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+                datetime.fromisoformat(since.replace("~", "+00:00"))
+                datetime.fromisoformat(until.replace("~", "+00:00"))
             except ValueError:
                 pass
         else:
@@ -278,8 +291,8 @@ class Database:
                    start_time: Optional[str] = None, end_time: Optional[str] = None) -> List[Dict]:
         """Get recent alerts."""
         if start_time and end_time:
-            since = start_time
-            until = end_time
+            since = get_iso_bound(start_time, is_end=False)
+            until = get_iso_bound(end_time, is_end=True)
         else:
             until = datetime.now(timezone.utc).isoformat()
             since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()

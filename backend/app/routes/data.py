@@ -9,7 +9,25 @@ import io
 import csv
 import json
 from datetime import datetime, timedelta, timezone
-from app.database import db
+from app.database import db, get_iso_bound
+
+def get_bin(ts_str: str, resolution_str: str) -> str:
+    if resolution_str == 'raw':
+        return ts_str
+    try:
+        dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+    except Exception:
+        return ts_str
+    if resolution_str == '1m':
+        dt = dt.replace(second=0, microsecond=0)
+    elif resolution_str == '5m':
+        dt = dt.replace(minute=(dt.minute // 5) * 5, second=0, microsecond=0)
+    elif resolution_str == '15m':
+        dt = dt.replace(minute=(dt.minute // 15) * 15, second=0, microsecond=0)
+    elif resolution_str == '1h':
+        dt = dt.replace(minute=0, second=0, microsecond=0)
+    return dt.isoformat()
+
 from app.models import MachineInfo, MachineStatus
 from app.auth import get_current_user
 
@@ -70,6 +88,7 @@ async def download_csv(
     minutes: int = Query(60, ge=1, le=10080),
     start_time: str = None,
     end_time: str = None,
+    resolution: str = Query("raw", description="Time resolution: raw, 1m, 5m, 15m, 1h"),
     current_user: dict = Depends(get_current_user)
 ):
     """Download historical data as CSV with full 3-phase parameters from features table."""
@@ -77,8 +96,8 @@ async def download_csv(
     
     def csv_generator():
         if start_time and end_time:
-            since = start_time
-            until = end_time
+            since = get_iso_bound(start_time, is_end=False)
+            until = get_iso_bound(end_time, is_end=True)
         else:
             since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
             until = datetime.now(timezone.utc).isoformat()
@@ -126,7 +145,26 @@ async def download_csv(
             output.seek(0)
             output.truncate(0)
             
-            # Fetch in chunks and stream
+            current_bin = None
+            machine_id_val = None
+            bin_sums = []
+            bin_counts = []
+
+            def flush_bin():
+                if current_bin is None:
+                    return ""
+                row = [current_bin, machine_id_val]
+                for i in range(len(bin_sums)):
+                    if bin_counts[i] > 0:
+                        row.append(round(bin_sums[i] / bin_counts[i], 2))
+                    else:
+                        row.append("")
+                writer.writerow([sanitize_csv_cell(cell) for cell in row])
+                ret = output.getvalue()
+                output.seek(0)
+                output.truncate(0)
+                return ret
+
             while True:
                 rows = cursor.fetchmany(1000)
                 if not rows:
@@ -134,41 +172,50 @@ async def download_csv(
                 for row in rows:
                     fd = json.loads(row["feature_data"]) if isinstance(row["feature_data"], str) else row["feature_data"]
                     el = fd.get("electrical", {})
-                    vib = fd.get("vibration", {})
                     
-                    raw_csv_row = [
-                        row["timestamp"], row["machine_id"],
-                        # Per-phase voltages (L-N)
+                    data_vals = [
                         el.get("v1n", ""), el.get("v2n", ""), el.get("v3n", ""), el.get("vln_avg", ""),
-                        # Line-to-line voltages
                         el.get("v12", ""), el.get("v23", ""), el.get("v31", ""), el.get("vll_avg", ""),
-                        # Per-phase currents
                         el.get("i1", ""), el.get("i2", ""), el.get("i3", ""), el.get("i_avg", ""),
-                        # Per-phase active power
                         el.get("kw1", ""), el.get("kw2", ""), el.get("kw3", ""), el.get("t_kw", ""),
-                        # Per-phase reactive power
                         el.get("kvar1", ""), el.get("kvar2", ""), el.get("kvar3", ""), el.get("t_kvar", ""),
-                        # Per-phase apparent power
                         el.get("kva1", ""), el.get("kva2", ""), el.get("kva3", ""), el.get("t_kva", ""),
-                        # Per-phase PF
                         el.get("pf1", ""), el.get("pf2", ""), el.get("pf3", ""), el.get("pf_avg", ""),
-                        # Energy
-                        el.get("kwh_imp", ""), el.get("kwh_exp", ""),
-                        el.get("kvarh_imp", ""), el.get("kvarh_exp", ""), el.get("t_kvah", ""),
-                        # Max demand
+                        el.get("kwh_imp", ""), el.get("kwh_exp", ""), el.get("kvarh_imp", ""), el.get("kvarh_exp", ""), el.get("t_kvah", ""),
                         el.get("md_kw", ""), el.get("md_kvar", ""), el.get("md_kva", ""),
-                        # Frequency
-                        el.get("frequency", ""),
-                        # Other
-                        fd.get("temperature", ""),
+                        el.get("frequency", ""), fd.get("temperature", "")
                     ]
-                    # Sanitize before writing
-                    safe_csv_row = [sanitize_csv_cell(cell) for cell in raw_csv_row]
-                    writer.writerow(safe_csv_row)
                     
-                yield output.getvalue()
-                output.seek(0)
-                output.truncate(0)
+                    if resolution == 'raw':
+                        raw_csv_row = [row["timestamp"], row["machine_id"]] + data_vals
+                        writer.writerow([sanitize_csv_cell(cell) for cell in raw_csv_row])
+                    else:
+                        ts_bin = get_bin(row["timestamp"], resolution)
+                        if current_bin is None:
+                            current_bin = ts_bin
+                            machine_id_val = row["machine_id"]
+                            bin_sums = [0.0] * len(data_vals)
+                            bin_counts = [0] * len(data_vals)
+                            
+                        if ts_bin != current_bin:
+                            yield flush_bin()
+                            current_bin = ts_bin
+                            machine_id_val = row["machine_id"]
+                            bin_sums = [0.0] * len(data_vals)
+                            bin_counts = [0] * len(data_vals)
+                            
+                        for i, val in enumerate(data_vals):
+                            if isinstance(val, (int, float)):
+                                bin_sums[i] += val
+                                bin_counts[i] += 1
+                                
+                if resolution == 'raw':
+                    yield output.getvalue()
+                    output.seek(0)
+                    output.truncate(0)
+                    
+            if resolution != 'raw' and current_bin is not None:
+                yield flush_bin()
 
     # Make the filename strictly safe
     safe_filename = f"export_{safe_id}_{start_time or minutes}.csv"

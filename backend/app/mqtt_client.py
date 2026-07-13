@@ -135,8 +135,8 @@ class MQTTClient:
             )
             self.last_energy_data[machine_id] = compat_energy
 
-            # Convert device epoch timestamp → datetime
-            ts = datetime.fromtimestamp(three_phase.dTS, tz=timezone.utc) if three_phase.dTS > 0 else datetime.now(timezone.utc)
+            # Use server UTC time instead of device epoch because the simulator/device sends a local timezone epoch
+            ts = datetime.now(timezone.utc)
 
             reading = SensorReading(
                 timestamp=ts,
