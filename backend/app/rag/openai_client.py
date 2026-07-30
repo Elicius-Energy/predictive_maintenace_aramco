@@ -280,7 +280,10 @@ Recent Alerts (past 30 minutes): {len(recent_alerts)} alert(s)
             messages = []
             for h in history[-5:]:
                 role = "user" if h["role"] == "user" else "assistant"
-                messages.append({"role": role, "content": h["content"]})
+                content = h["content"]
+                if role == "assistant" and len(content) > 1000:
+                    content = content[:1000] + "... [truncated to save context tokens]"
+                messages.append({"role": role, "content": content})
             
             messages.append({"role": "user", "content": user_message})
             

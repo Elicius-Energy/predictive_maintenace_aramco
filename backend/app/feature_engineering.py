@@ -139,8 +139,10 @@ class FeatureExtractor:
         # ── Manufacturer-curve efficiency (PCHIP interpolation) ─────────
         from app.motor_efficiency import motor_efficiency_estimator
 
-        # P_in in watts — e.P is already in watts for single-phase data
-        p_in_w = e.P
+        # P_in in watts
+        # e.P is in watts for legacy single-phase data, but for the 3-phase meter it's t_kw (in kW)
+        p_in_w = e.P * 1000.0 if hasattr(reading, "_three_phase") else e.P
+        
         eff_result = motor_efficiency_estimator.estimate(
             p_in_watts=p_in_w,
             voltage=e.V,
