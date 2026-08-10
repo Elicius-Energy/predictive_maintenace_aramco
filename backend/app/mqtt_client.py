@@ -23,6 +23,7 @@ class MQTTClient:
     # Map device IDs to friendly names
     DEVICE_NAME_MAP: dict[str, str] = {
         "002200203335471332323632": "LEDL_Demo",
+        "002D00203335471332323632": "LEDL_Device_2",
     }
 
     def __init__(self):
@@ -51,7 +52,8 @@ class MQTTClient:
             # client.subscribe(settings.MQTT_TOPIC_ENERGY)
             # client.subscribe(settings.MQTT_TOPIC_ACCEL)
             client.subscribe(settings.MQTT_TOPIC_LEDL)
-            logger.info(f"Subscribed to: {settings.MQTT_TOPIC_LEDL}")
+            client.subscribe(getattr(settings, "MQTT_TOPIC_LEDL2", "ledl2"))
+            logger.info(f"Subscribed to: {settings.MQTT_TOPIC_LEDL} and {getattr(settings, 'MQTT_TOPIC_LEDL2', 'ledl2')}")
         else:
             logger.error(f"MQTT connection failed with code {rc}")
             self.connected = False
@@ -69,7 +71,8 @@ class MQTTClient:
             self.last_message_time = time.time()
 
             # ── Handle 3-phase LEDL topic ──────────────────────────────────
-            if msg.topic == settings.MQTT_TOPIC_LEDL:
+            ledl_topics = [settings.MQTT_TOPIC_LEDL, getattr(settings, "MQTT_TOPIC_LEDL2", "ledl2")]
+            if msg.topic in ledl_topics:
                 self._handle_ledl_message(payload)
                 return
 

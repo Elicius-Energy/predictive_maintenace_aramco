@@ -7,21 +7,24 @@ import ChatBotBubble from '../ai/ChatBotBubble';
 
 const Layout: FC = () => {
   return (
-    <div className="flex h-screen text-text-primary overflow-hidden font-sans">
-      <Sidebar />
-      <div className="flex-1 flex flex-col min-w-0">
-        <Topbar />
-        <main className="flex-1 overflow-y-auto p-6">
-          <div className="max-w-[1600px] mx-auto h-full flex flex-col space-y-4">
-            <MotorDetailsSummary />
-            <div className="flex-1 min-h-0">
+    <>
+      {/* Static background image instead of 3D canvas */}
+      <div className="static-bg" />
+
+      <div className="flex h-screen text-text-primary overflow-hidden font-sans relative z-10">
+        <Sidebar />
+        <div className="flex-1 flex flex-col min-w-0">
+          <Topbar />
+          <main className="flex-1 overflow-y-auto p-5">
+            <div className="max-w-[1600px] mx-auto space-y-4">
+              <MotorDetailsSummary />
               <Outlet />
             </div>
-          </div>
-        </main>
+          </main>
+        </div>
+        <ChatBotBubble />
       </div>
-      <ChatBotBubble />
-    </div>
+    </>
   );
 };
 

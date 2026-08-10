@@ -7,6 +7,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import api from '../utils/api';
 import MotorDetailsForm from './MotorDetailsForm';
+import Layout from '../components/layout/Layout';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -32,8 +33,11 @@ const MachineSelection: FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-surface-muted p-8 md:p-12 font-sans overflow-y-auto w-full">
-      <div className="max-w-[1600px] mx-auto space-y-10">
+    <div className="min-h-screen p-8 md:p-12 font-sans overflow-y-auto w-full relative">
+      {/* Static Background Image */}
+      <div className="static-bg" />
+
+      <div className="max-w-[1600px] mx-auto space-y-10 relative z-10">
         <div className="flex flex-col gap-3">
         <div className="flex items-center gap-3">
           <Factory size={28} className="text-primary" />
@@ -55,15 +59,15 @@ const MachineSelection: FC = () => {
               "industrial-card p-6 flex flex-col gap-4 cursor-pointer transition-all duration-300 relative overflow-hidden group",
               activeMachine?.machine_id === machine.machine_id 
                 ? "border-primary ring-2 ring-primary/20 shadow-md" 
-                : "hover:border-primary/40 hover:shadow-md"
+                : "hover:border-primary/30 hover:shadow-md"
             )}
           >
 
             {/* Background Icon Watermark */}
-            <Cog size={120} className="absolute -right-8 -bottom-8 text-gray-100 -rotate-12 group-hover:rotate-0 transition-transform duration-700" />
+            <Cog size={120} className="absolute -right-8 -bottom-8 text-white/[0.03] -rotate-12 group-hover:rotate-0 transition-transform duration-700" />
 
             <div className="flex justify-between items-start relative z-10">
-              <div className="w-14 h-14 rounded-xl bg-surface-muted border border-border flex items-center justify-center">
+              <div className="w-14 h-14 rounded-xl bg-white/5 border border-white/8 flex items-center justify-center">
                  <Cog size={28} className={cn(
                      "transition-colors",
                      machine.status === 'healthy' ? "text-accent-green" : 
@@ -72,8 +76,8 @@ const MachineSelection: FC = () => {
               </div>
               <div className={cn(
                 "px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1.5",
-                machine.status === 'healthy' ? "bg-accent-green-light text-accent-green border border-emerald-200" : 
-                machine.status === 'warning' ? "bg-accent-amber-light text-accent-amber border border-amber-200" : "bg-accent-red-light text-accent-red border border-red-200"
+                machine.status === 'healthy' ? "bg-accent-green/12 text-accent-green border border-accent-green/25" : 
+                machine.status === 'warning' ? "bg-accent-amber/12 text-accent-amber border border-accent-amber/25" : "bg-accent-red/12 text-accent-red border border-accent-red/25"
               )}>
                 {machine.status === 'healthy' ? <CheckCircle2 size={12} /> : machine.status === 'warning' ? <AlertTriangle size={12} /> : <ShieldX size={12} />}
                 {machine.status}
@@ -89,7 +93,7 @@ const MachineSelection: FC = () => {
             </div>
 
             <div className="grid grid-cols-2 gap-4 mt-2 relative z-10">
-              <div className="bg-surface-muted p-4 rounded-xl border border-border">
+              <div className="bg-white/5 p-4 rounded-xl border border-white/8">
                  <p className="text-xs text-text-muted uppercase tracking-tight font-semibold">Health Score</p>
                  <div className={cn(
                     "text-2xl font-extrabold scada-number mt-1",
@@ -99,7 +103,7 @@ const MachineSelection: FC = () => {
                     {machine.health_score}%
                  </div>
               </div>
-              <div className="bg-surface-muted p-4 rounded-xl border border-border">
+              <div className="bg-white/5 p-4 rounded-xl border border-white/8">
                  <p className="text-xs text-text-muted uppercase tracking-tight font-semibold">Runtime</p>
                  <div className="text-2xl font-extrabold scada-number text-text-primary mt-1">
                     {Math.floor(machine.uptime_hours)}<span className="text-sm text-text-muted ml-1">HRS</span>
@@ -111,7 +115,7 @@ const MachineSelection: FC = () => {
                 "w-full py-3 flex items-center justify-center gap-2 text-sm font-bold uppercase tracking-wide rounded-xl transition-all mt-2 relative z-10",
                 activeMachine?.machine_id === machine.machine_id 
                     ? "bg-primary text-white shadow-md" 
-                    : "bg-surface-muted text-text-secondary group-hover:bg-primary/10 group-hover:text-primary border border-border"
+                    : "bg-white/5 text-text-secondary group-hover:bg-primary/10 group-hover:text-primary border border-white/8"
             )}>
                 {activeMachine?.machine_id === machine.machine_id ? 'Selected Active' : 'Monitor Asset'}
                 <ChevronRight size={16} />

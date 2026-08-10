@@ -2,6 +2,7 @@
 
 Professional IIoT Condition Monitoring & AI-Driven Diagnostics Platform.
 
+AWS: ssh -i LEDL.pem ubuntu@3.104.55.137    
 ## 🚀 Overview
 
 This system provides real-time monitoring and predictive maintenance for critical industrial assets (pumps, compressors, fans). It integrates high-frequency vibration and electrical data with a Retrieval-Augmented Generation (RAG) system using OpenAI to provide actionable, physics-grounded engineering insights.

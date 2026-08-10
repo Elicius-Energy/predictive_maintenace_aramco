@@ -22,6 +22,8 @@ def get_bin(ts_str: str, resolution_str: str) -> str:
         dt = dt.replace(second=0, microsecond=0)
     elif resolution_str == '5m':
         dt = dt.replace(minute=(dt.minute // 5) * 5, second=0, microsecond=0)
+    elif resolution_str == '10m':
+        dt = dt.replace(minute=(dt.minute // 10) * 10, second=0, microsecond=0)
     elif resolution_str == '15m':
         dt = dt.replace(minute=(dt.minute // 15) * 15, second=0, microsecond=0)
     elif resolution_str == '1h':
@@ -236,6 +238,7 @@ async def get_machines(current_user: dict = Depends(get_current_user)):
     # Map device IDs to friendly names
     DEVICE_NAME_MAP = {
         "002200203335471332323632": "LEDL_Demo",
+        "002D00203335471332323632": "LEDL_Device_2",
     }
     
     # Sort by most recent feature data so the actively-producing machine is first

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useRef, useEffect } from 'react';
 import type { FC } from 'react';
 import {
   LineChart,
@@ -7,7 +7,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
   Legend,
   ReferenceLine
 } from 'recharts';
@@ -26,14 +25,28 @@ interface TimeSeriesChartProps {
 }
 
 const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ data, lines, yDomain, title, threshold }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        setSize({
+          width: entry.contentRect.width,
+          height: entry.contentRect.height
+        });
+      }
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
   // Memoize the expensive map + sort so it only re-computes when data changes
   const processedData = useMemo(() => {
     return data.map(d => {
       let timeValue;
       if (d.dTS && d.dTS > 0) {
-        // Device sends "epoch time IST", meaning the epoch is offset by +5.5 hours.
-        // We subtract the IST offset (19800 seconds) so it becomes a standard UTC epoch.
-        // Then formatting it to 'Asia/Kolkata' will correctly display the time.
         timeValue = (d.dTS - 19800) * 1000;
       } else {
         timeValue = new Date(d.timestamp.endsWith('Z') ? d.timestamp : d.timestamp + 'Z').getTime();
@@ -53,9 +66,9 @@ const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ data, lines, yDomain, title
           {data.length} pts
         </span>
       </div>
-      <div className="flex-1 min-h-0">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={processedData} margin={{ top: 5, right: 20, left: -20, bottom: 0 }}>
+      <div className="flex-1 min-h-0 min-w-0 w-full" ref={containerRef}>
+        {size.width > 0 && size.height > 0 && (
+          <LineChart width={size.width} height={size.height} data={processedData} margin={{ top: 5, right: 20, left: -20, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.2)" vertical={false} />
             <XAxis 
               dataKey="timeValue" 
@@ -68,9 +81,12 @@ const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ data, lines, yDomain, title
               minTickGap={50}
               tickFormatter={(unix) => {
                 try {
-                  // We formatted all timestamps to standard UTC epoch, 
-                  // so we can reliably use Asia/Kolkata here.
-                  return new Date(unix).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false });
+                  const date = new Date(unix);
+                  const spanHours = processedData.length > 0 ? (processedData[processedData.length - 1].timeValue - processedData[0].timeValue) / (1000 * 60 * 60) : 0;
+                  if (spanHours > 24) {
+                    return date.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+                  }
+                  return date.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false });
                 } catch {
                   return '';
                 }
@@ -86,16 +102,17 @@ const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ data, lines, yDomain, title
             />
             <Tooltip 
               contentStyle={{ 
-                background: 'rgba(255, 255, 255, 0.75)', 
+                background: 'rgba(15, 23, 42, 0.85)', 
                 backdropFilter: 'blur(12px)',
                 WebkitBackdropFilter: 'blur(12px)',
-                border: '1px solid rgba(255, 255, 255, 0.5)', 
+                border: '1px solid rgba(255, 255, 255, 0.1)', 
                 borderRadius: '12px', 
                 fontSize: '12px', 
-                boxShadow: '0 8px 32px -4px rgba(0,0,0,0.1)' 
+                boxShadow: '0 8px 32px -4px rgba(0,0,0,0.5)' 
               }}
-              itemStyle={{ padding: '2px 0' }}
-              labelFormatter={(unix) => new Date(unix).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false })}
+              itemStyle={{ padding: '2px 0', color: '#f8fafc' }}
+              labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
+              labelFormatter={(unix) => new Date(unix).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
             />
             <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
             {lines.map((line) => (
@@ -123,7 +140,7 @@ const TimeSeriesChart: FC<TimeSeriesChartProps> = ({ data, lines, yDomain, title
               />
             )}
           </LineChart>
-        </ResponsiveContainer>
+        )}
       </div>
     </div>
   );

@@ -9,7 +9,7 @@ import TimeSeriesChart from '../components/charts/TimeSeriesChart';
 import GaugeChart from '../components/charts/GaugeChart';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { estimateMotorEfficiency } from '../data/motorEfficiency';
-import { TrendingUp, ShieldAlert, WifiOff } from 'lucide-react';
+import { TrendingUp, ShieldAlert, WifiOff, IndianRupee } from 'lucide-react';
 
 // removed unused fmt
 
@@ -20,7 +20,15 @@ const DashboardOverview: FC = () => {
   const { timeRange, isAutoUpdate } = useMachine();
   
   const [targetEfficiency, setTargetEfficiency] = useState<number>(95);
+  const [newMotorCost, setNewMotorCost] = useState<number>(0);
   const [nowTs, setNowTs] = useState<number>(Date.now());
+
+  // Sync newMotorCost when motorDetails loads/changes
+  useEffect(() => {
+    if (motorDetails?.motorPrice && newMotorCost === 0) {
+      setNewMotorCost(motorDetails.motorPrice);
+    }
+  }, [motorDetails]);
 
   // Force re-render for real-time updates when auto is selected
   useEffect(() => {
@@ -97,18 +105,18 @@ const DashboardOverview: FC = () => {
     { name: 'Run Time', value: periodRunTimeHours },
     { name: 'Idle Time', value: idleHours }
   ];
-  const donutColors = ['#0891b2', '#94a3b8'];
+  const donutColors = ['#0A84FF', '#48484A'];
 
   // ROI inputs (hardcoded defaults for layout)
   const annualHours = 8000;
 
-  // ROI Computation
+  // ROI Computation — uses inline newMotorCost for payback
   const roiCalc = useMemo(() => {
     if (!efficiencyCalc || !motorDetails) return null;
     const { etaActual, pMeasured } = efficiencyCalc;
     const etaTarget = targetEfficiency;
     const elecCost = motorDetails.electricityCost;
-    const motorPrice = motorDetails.motorPrice;
+    const motorPrice = newMotorCost > 0 ? newMotorCost : motorDetails.motorPrice;
 
     if (etaTarget <= 0 || etaActual <= 0 || pMeasured <= 0) return null;
 
@@ -118,12 +126,12 @@ const DashboardOverview: FC = () => {
     const payback = costSaved > 0 ? motorPrice / costSaved : Infinity;
 
     return { powerSaved, energySaved, costSaved, payback };
-  }, [efficiencyCalc, motorDetails, targetEfficiency, annualHours]);
+  }, [efficiencyCalc, motorDetails, targetEfficiency, newMotorCost, annualHours]);
 
   return (
-    <div className="h-full flex flex-col gap-4 overflow-hidden">
+    <div className="flex flex-col gap-5 pb-4">
       {!hasData && (
-        <div className="flex items-center justify-center gap-3 p-3 industrial-card border-l-4 border-l-amber-400 shrink-0">
+        <div className="flex items-center justify-center gap-3 p-3 industrial-card border-l-4 border-l-accent-amber shrink-0">
           <WifiOff size={18} className="text-accent-amber" />
           <p className="text-sm font-semibold text-accent-amber">
             {isConnected ? 'Waiting for 3-phase data...' : 'WebSocket disconnected — no live data'}
@@ -131,19 +139,44 @@ const DashboardOverview: FC = () => {
         </div>
       )}
 
-      {/* Row 1: 3 Gauges (20% height approx) */}
-      <div id="report-row-1" className="grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0 h-44">
-        <div className="industrial-card p-3 flex flex-col items-center justify-center">
-          <GaugeChart 
-            value={e?.vll_avg ?? 0} 
-            min={0} 
-            max={500} 
-            unit="V" 
-            label="Average L-L Voltage" 
-            thresholds={{ warning: 430, critical: 450 }} 
-          />
+      {/* Row 1: 3 Gauges */}
+      <div id="report-row-1" className="grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0">
+        <div className="industrial-card p-3 flex flex-col justify-center min-h-[180px] col-span-1 md:col-span-2 lg:col-span-1">
+          <h3 className="text-[11px] font-extrabold text-text-muted uppercase tracking-wider mb-1 text-center">Phase-to-Phase Voltages</h3>
+          <div className="grid grid-cols-3 gap-1 w-full justify-items-center">
+            <GaugeChart 
+              value={e?.v12 ?? 0} 
+              min={0} 
+              max={500} 
+              unit="V" 
+              label="V12" 
+              thresholds={{ warning: 430, critical: 450 }} 
+              size="sm"
+              color="#FF453A"
+            />
+            <GaugeChart 
+              value={e?.v23 ?? 0} 
+              min={0} 
+              max={500} 
+              unit="V" 
+              label="V23" 
+              thresholds={{ warning: 430, critical: 450 }} 
+              size="sm"
+              color="#FFD60A"
+            />
+            <GaugeChart 
+              value={e?.v31 ?? 0} 
+              min={0} 
+              max={500} 
+              unit="V" 
+              label="V31" 
+              thresholds={{ warning: 430, critical: 450 }} 
+              size="sm"
+              color="#0A84FF"
+            />
+          </div>
         </div>
-        <div className="industrial-card p-3 flex flex-col items-center justify-center">
+        <div className="industrial-card p-3 flex flex-col items-center justify-center min-h-[180px]">
           <GaugeChart 
             value={e?.pf_avg ?? 0} 
             min={0} 
@@ -153,14 +186,14 @@ const DashboardOverview: FC = () => {
             thresholds={{ warning: 0.85, critical: 0.7 }} 
           />
         </div>
-        <div className="industrial-card p-3 grid grid-cols-2">
-          <div className="text-center flex flex-col justify-center border-r border-white/30 px-2">
-            <h3 className="text-[10px] font-bold text-text-secondary uppercase tracking-wider mb-2">Energy Consumed</h3>
-            <p className="text-3xl font-extrabold text-teal-600 scada-number">{periodEnergy.toFixed(1)}</p>
-            <p className="text-xs font-semibold text-teal-700 mt-1">kWh (Period)</p>
+        <div className="industrial-card p-3 grid grid-cols-2 min-h-[180px]">
+          <div className="text-center flex flex-col justify-center border-r border-white/10 px-2">
+            <h3 className="text-[11px] font-extrabold text-text-secondary uppercase tracking-wider mb-2">Energy Consumed</h3>
+            <p className="text-3xl font-extrabold text-primary scada-number drop-shadow-[0_0_8px_rgba(10,132,255,0.25)]">{periodEnergy.toFixed(1)}</p>
+            <p className="text-xs font-semibold text-primary/70 mt-1">kWh (Period)</p>
           </div>
           <div className="flex flex-col items-center justify-center relative px-2">
-            <h3 className="text-[10px] font-bold text-text-secondary uppercase tracking-wider mb-1">Run Time vs Idle</h3>
+            <h3 className="text-[11px] font-extrabold text-text-secondary uppercase tracking-wider mb-1">Run Time vs Idle</h3>
             <div className="w-full h-[90px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -181,13 +214,13 @@ const DashboardOverview: FC = () => {
                   <RechartsTooltip 
                     formatter={(value: any) => [`${Number(value).toFixed(1)} hrs`, '']}
                     contentStyle={{ 
-                      background: 'rgba(255,255,255,0.75)', 
-                      backdropFilter: 'blur(12px)',
-                      border: '1px solid rgba(255,255,255,0.5)', 
+                      background: 'rgba(44, 44, 46, 0.90)', 
+                      backdropFilter: 'blur(20px)',
+                      border: '0.5px solid rgba(255, 255, 255, 0.10)', 
                       borderRadius: '10px', 
-                      color: '#0f172a', 
+                      color: '#f5f5f7', 
                       fontSize: '12px',
-                      boxShadow: '0 4px 16px rgba(0,0,0,0.08)'
+                      boxShadow: '0 4px 20px rgba(0,0,0,0.35)'
                     }}
                   />
                 </PieChart>
@@ -200,77 +233,95 @@ const DashboardOverview: FC = () => {
         </div>
       </div>
 
-      {/* Row 2: Line Charts (45% height approx) */}
-      <div id="report-row-2" className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 min-h-0">
-        <div className="industrial-card p-4 flex flex-col">
+      {/* Row 2: Line Charts */}
+      <div id="report-row-2" className="grid grid-cols-1 md:grid-cols-2 gap-4 shrink-0">
+        <div className="industrial-card p-4 flex flex-col min-h-[300px]">
           <div className="flex-1 min-h-0">
             <TimeSeriesChart
               data={electricalHistory}
               title="Current Profile (A)"
               lines={[
-                { key: 'i1', color: '#ef4444', name: 'L1 Current', dashed: true },
-                { key: 'i2', color: '#f59e0b', name: 'L2 Current', dashed: true },
-                { key: 'i3', color: '#3b82f6', name: 'L3 Current', dashed: true },
-                { key: 'i', color: '#0891b2', name: 'Avg Current', dashed: false },
+                { key: 'i1', color: '#FF453A', name: `L1 Current (${(e?.i1 ?? 0).toFixed(1)}A)`, dashed: true },
+                { key: 'i2', color: '#FFD60A', name: `L2 Current (${(e?.i2 ?? 0).toFixed(1)}A)`, dashed: true },
+                { key: 'i3', color: '#409CFF', name: `L3 Current (${(e?.i3 ?? 0).toFixed(1)}A)`, dashed: true },
+                { key: 'i', color: '#30D158', name: `Avg Current (${(e?.i_avg ?? e?.current ?? 0).toFixed(1)}A)`, dashed: false },
               ]}
               threshold={motorDetails?.ratedCurrent ? {
                 value: motorDetails.ratedCurrent,
                 label: `Rated: ${motorDetails.ratedCurrent}A`,
-                color: '#dc2626'
+                color: '#FF453A'
               } : undefined}
             />
           </div>
         </div>
-        <div className="industrial-card p-4 flex flex-col">
+        <div className="industrial-card p-4 flex flex-col min-h-[300px]">
           <div className="flex-1 min-h-0">
             <TimeSeriesChart
               data={electricalHistory}
               title="Active Power (kW)"
               lines={[
-                { key: 'kw1', color: '#ef4444', name: 'L1 kW', dashed: true },
-                { key: 'kw2', color: '#f59e0b', name: 'L2 kW', dashed: true },
-                { key: 'kw3', color: '#3b82f6', name: 'L3 kW', dashed: true },
-                { key: 'p', color: '#10b981', name: 'Total kW', dashed: false },
+                { key: 'kw1', color: '#FF453A', name: `L1 kW (${(e?.kw1 ?? 0).toFixed(2)}kW)`, dashed: true },
+                { key: 'kw2', color: '#FFD60A', name: `L2 kW (${(e?.kw2 ?? 0).toFixed(2)}kW)`, dashed: true },
+                { key: 'kw3', color: '#409CFF', name: `L3 kW (${(e?.kw3 ?? 0).toFixed(2)}kW)`, dashed: true },
+                { key: 'p', color: '#30D158', name: `Total kW (${(e?.t_kw ?? e?.active_power ?? 0).toFixed(2)}kW)`, dashed: false },
               ]}
               threshold={motorDetails?.ratedPower ? {
                 value: motorDetails.ratedPower,
                 label: `Rated: ${motorDetails.ratedPower}kW`,
-                color: '#dc2626'
+                color: '#FF453A'
               } : undefined}
             />
           </div>
         </div>
       </div>
 
-      {/* Row 3: Efficiency Analysis (35% height approx) */}
-      <div className="shrink-0 h-64 overflow-y-auto">
+      {/* Row 3: Efficiency Analysis */}
+      <div className="shrink-0">
         {efficiencyCalc && (
-          <div className="industrial-card p-4 border-l-4 border-l-cyan-500 h-full flex flex-col">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 shrink-0 gap-3">
+          <div className="glass-card-premium p-5 border-l-4 border-l-primary flex flex-col">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 shrink-0 gap-3">
               <h3 className="text-sm font-bold text-text-primary uppercase tracking-wider flex items-center gap-2">
                 <TrendingUp className="text-primary" size={18} />
                 Motor Efficiency & ROI Analysis
               </h3>
               
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <label className="text-xs font-bold text-text-secondary uppercase">New Motor η:</label>
+              <div className="flex items-center gap-3 flex-wrap">
+                {/* New Motor η Input */}
+                <div className="flex items-center gap-1.5 glass-badge px-2.5 py-1.5 rounded-lg">
+                  <label className="text-[11px] font-extrabold text-text-secondary uppercase whitespace-nowrap">New Motor η:</label>
                   <div className="relative">
                     <input 
                       type="number" 
                       value={targetEfficiency}
                       onChange={(e) => setTargetEfficiency(Number(e.target.value))}
-                      className="w-20 glass-input text-sm font-mono font-bold text-primary pl-2 pr-6 py-1 rounded-lg"
+                      className="w-16 glass-input text-sm font-mono font-bold text-primary pl-2 pr-5 py-1 rounded-lg"
                       step="0.1"
                       min="50"
                       max="100"
                     />
-                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-bold text-text-muted">%</span>
+                    <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-text-muted">%</span>
+                  </div>
+                </div>
+
+                {/* New Motor Cost Input */}
+                <div className="flex items-center gap-1.5 glass-badge px-2.5 py-1.5 rounded-lg">
+                  <label className="text-[11px] font-extrabold text-text-secondary uppercase whitespace-nowrap">New Motor Cost:</label>
+                  <div className="relative">
+                    <IndianRupee size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-text-muted" />
+                    <input 
+                      type="number" 
+                      value={newMotorCost || ''}
+                      onChange={(e) => setNewMotorCost(Number(e.target.value))}
+                      className="w-24 glass-input text-sm font-mono font-bold text-primary pl-6 pr-2 py-1 rounded-lg"
+                      step="1000"
+                      min="0"
+                      placeholder="0"
+                    />
                   </div>
                 </div>
 
                 {efficiencyCalc.extrapolated && (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg glass-badge text-[10px] font-extrabold text-amber-700 uppercase tracking-wider border-amber-300/50">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg glass-badge text-[10px] font-extrabold text-accent-amber uppercase tracking-wider border-accent-amber/20">
                     <ShieldAlert size={12} />
                     Extrapolated
                   </span>
@@ -278,20 +329,20 @@ const DashboardOverview: FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-6 gap-3 flex-1 min-h-0 items-center">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-stretch">
               {/* η rated */}
-              <div className="p-3 rounded-xl bg-emerald-500/10 backdrop-blur-sm border border-emerald-200/40 text-center flex flex-col justify-center h-full">
-                <p className="text-[10px] font-extrabold text-emerald-700 uppercase tracking-wider mb-1">η Rated</p>
-                <p className="text-xl font-mono font-extrabold text-emerald-600">{efficiencyCalc.etaRated.toFixed(1)}<span className="text-xs">%</span></p>
+              <div className="p-3 rounded-xl bg-accent-green/8 backdrop-blur-sm border border-accent-green/20 text-center flex flex-col justify-center">
+                <p className="text-[10px] font-extrabold text-accent-green uppercase tracking-wider mb-1">η Rated</p>
+                <p className="text-xl font-mono font-extrabold text-accent-green">{efficiencyCalc.etaRated.toFixed(1)}<span className="text-xs">%</span></p>
               </div>
               {/* η actual */}
-              <div className={`p-3 rounded-xl text-center flex flex-col justify-center h-full backdrop-blur-sm border ${efficiencyCalc.gap > 5
-                ? 'bg-red-500/10 border-red-200/40'
+              <div className={`p-3 rounded-xl text-center flex flex-col justify-center backdrop-blur-sm border ${efficiencyCalc.gap > 5
+                ? 'bg-accent-red/8 border-accent-red/20'
                 : efficiencyCalc.gap > 2
-                  ? 'bg-amber-500/10 border-amber-200/40'
-                  : 'bg-cyan-500/10 border-cyan-200/40'
+                  ? 'bg-accent-amber/8 border-accent-amber/20'
+                  : 'bg-primary/8 border-primary/20'
                 }`}>
-                <p className="text-[10px] font-extrabold text-text-secondary uppercase tracking-wider mb-1">η Estimated</p>
+                <p className="text-[11px] font-extrabold text-text-secondary uppercase tracking-wider mb-1">η Estimated</p>
                 <p className={`text-xl font-mono font-extrabold ${efficiencyCalc.gap > 5
                   ? 'text-accent-red'
                   : efficiencyCalc.gap > 2
@@ -300,36 +351,36 @@ const DashboardOverview: FC = () => {
                   }`}>{efficiencyCalc.etaActual.toFixed(1)}<span className="text-xs">%</span></p>
               </div>
               {/* Load % */}
-              <div className={`p-3 rounded-xl text-center flex flex-col justify-center h-full backdrop-blur-sm border ${efficiencyCalc.loadPct > 115
-                  ? 'bg-red-500/10 border-red-200/40'
+              <div className={`p-3 rounded-xl text-center flex flex-col justify-center backdrop-blur-sm border ${efficiencyCalc.loadPct > 115
+                  ? 'bg-accent-red/8 border-accent-red/20'
                   : efficiencyCalc.loadPct > 100
-                    ? 'bg-amber-500/10 border-amber-200/40'
-                    : 'bg-violet-500/10 border-violet-200/40'
+                    ? 'bg-accent-amber/8 border-accent-amber/20'
+                    : 'bg-violet-500/8 border-violet-400/20'
                 }`}>
-                <p className="text-[10px] font-extrabold text-text-secondary uppercase tracking-wider mb-1">Load</p>
+                <p className="text-[11px] font-extrabold text-text-secondary uppercase tracking-wider mb-1">Load</p>
                 <p className={`text-xl font-mono font-extrabold ${efficiencyCalc.loadPct > 115 ? 'text-accent-red'
                     : efficiencyCalc.loadPct > 100 ? 'text-accent-amber'
-                      : 'text-violet-600'
+                      : 'text-violet-400'
                   }`}>{efficiencyCalc.loadPct.toFixed(1)}<span className="text-xs">%</span></p>
               </div>
               
               {/* ROI block 1 */}
-              <div className="p-3 rounded-xl bg-white/30 backdrop-blur-sm border border-white/50 text-center flex flex-col justify-center h-full">
-                <p className="text-[10px] text-text-muted uppercase font-bold tracking-tight mb-1">Energy Saved/Yr</p>
+              <div className="p-3 rounded-xl bg-white/5 backdrop-blur-sm border border-white/8 text-center flex flex-col justify-center">
+                <p className="text-[11px] text-text-muted uppercase font-extrabold tracking-tight mb-1">Energy Saved/Yr</p>
                 <p className="text-xl font-extrabold text-accent-green scada-number">
                   {roiCalc ? roiCalc.energySaved.toFixed(0) : '--'} <span className="text-xs text-text-muted">kWh</span>
                 </p>
               </div>
               {/* ROI block 2 */}
-              <div className="p-3 rounded-xl bg-white/30 backdrop-blur-sm border border-white/50 text-center flex flex-col justify-center h-full">
-                <p className="text-[10px] text-text-muted uppercase font-bold tracking-tight mb-1">Cost Saved/Yr</p>
-                <p className="text-xl font-extrabold text-emerald-600 scada-number">
+              <div className="p-3 rounded-xl bg-white/5 backdrop-blur-sm border border-white/8 text-center flex flex-col justify-center">
+                <p className="text-[11px] text-text-muted uppercase font-extrabold tracking-tight mb-1">Cost Saved/Yr</p>
+                <p className="text-xl font-extrabold text-accent-green scada-number">
                   {roiCalc ? `₹${roiCalc.costSaved.toFixed(0)}` : '--'}
                 </p>
               </div>
               {/* ROI block 3 */}
-              <div className="p-3 rounded-xl bg-white/30 backdrop-blur-sm border border-white/50 text-center flex flex-col justify-center h-full">
-                <p className="text-[10px] text-text-muted uppercase font-bold tracking-tight mb-1">Simple Payback</p>
+              <div className="p-3 rounded-xl bg-white/5 backdrop-blur-sm border border-white/8 text-center flex flex-col justify-center">
+                <p className="text-[11px] text-text-muted uppercase font-extrabold tracking-tight mb-1">Simple Payback</p>
                 <p className={`text-xl font-extrabold scada-number ${roiCalc && roiCalc.payback < 3 ? 'text-accent-green' : roiCalc && roiCalc.payback < 7 ? 'text-accent-amber' : 'text-accent-red'}`}>
                   {roiCalc ? (roiCalc.payback === Infinity ? '∞' : roiCalc.payback.toFixed(1)) : '--'} <span className="text-xs text-text-muted">yrs</span>
                 </p>
@@ -343,3 +394,4 @@ const DashboardOverview: FC = () => {
 };
 
 export default DashboardOverview;
+

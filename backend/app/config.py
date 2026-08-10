@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     MQTT_TOPIC_ENERGY: str = "energy/+"
     MQTT_TOPIC_ACCEL: str = "energy/+/accel"
     MQTT_TOPIC_LEDL: str = "ledl"
+    MQTT_TOPIC_LEDL2: str = "ledl2"
     MQTT_CLIENT_ID: str = "predictive_maintenance_backend"
     MQTT_RECONNECT_DELAY: int = 5
     MQTT_MAX_RECONNECT_DELAY: int = 60

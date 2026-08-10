@@ -14,21 +14,23 @@ interface GaugeChartProps {
   unit: string;
   label: string;
   thresholds?: { warning: number; critical: number };
+  size?: 'sm' | 'md';
+  color?: string;
 }
 
-const GaugeChart: FC<GaugeChartProps> = ({ value, min, max, unit, label, thresholds }) => {
+const GaugeChart: FC<GaugeChartProps> = ({ value, min, max, unit, label, thresholds, size = 'md', color }) => {
   const percentage = Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100));
   
   let colorClass = "text-primary";
-  let strokeColor = "#0891b2";
+  let strokeColor = color || "#22d3ee";
 
   if (thresholds) {
     if (value >= thresholds.critical) {
       colorClass = "text-accent-red";
-      strokeColor = "#dc2626";
+      strokeColor = "#ef4444";
     } else if (value >= thresholds.warning) {
       colorClass = "text-accent-amber";
-      strokeColor = "#d97706";
+      strokeColor = "#f59e0b";
     }
   }
 
@@ -38,16 +40,18 @@ const GaugeChart: FC<GaugeChartProps> = ({ value, min, max, unit, label, thresho
   const offset = circumference - (percentage / 100) * (span / 360) * circumference;
   const rotation = 150;
 
+  const isSmall = size === 'sm';
+
   return (
-    <div className="flex flex-col items-center justify-center p-2 relative group">
-      <svg className="w-36 h-36" viewBox="0 0 100 100">
+    <div className={cn("flex flex-col items-center justify-center relative group", isSmall ? "p-1" : "p-2")}>
+      <svg className={isSmall ? "w-24 h-24" : "w-36 h-36"} viewBox="0 0 100 100">
         {/* Background track */}
         <circle
           cx="50"
           cy="50"
           r={radius}
           fill="transparent"
-          stroke="rgba(148, 163, 184, 0.25)"
+          stroke="rgba(255, 255, 255, 0.1)"
           strokeWidth="7"
           strokeDasharray={`${(span / 360) * circumference} ${circumference}`}
           strokeDashoffset="0"
@@ -75,13 +79,16 @@ const GaugeChart: FC<GaugeChartProps> = ({ value, min, max, unit, label, thresho
       </svg>
       
       <div className="absolute inset-0 flex flex-col items-center justify-center pt-2">
-        <span className={cn("text-2xl font-extrabold scada-number leading-none", colorClass)}>
+        <span 
+          className={cn("font-extrabold scada-number leading-none", !color && colorClass, isSmall ? "text-xl" : "text-2xl")}
+          style={color && !thresholds ? { color: strokeColor } : undefined}
+        >
           {value.toFixed(value < 10 ? 2 : 1)}
         </span>
-        <span className="text-[10px] text-text-muted uppercase font-bold tracking-tight">{unit}</span>
+        <span className={cn("text-gray-400 uppercase font-bold tracking-tight", isSmall ? "text-[8px]" : "text-[10px]")}>{unit}</span>
       </div>
       
-      <div className="mt-[-8px] text-xs font-bold text-text-secondary text-center uppercase tracking-wider">{label}</div>
+      <div className={cn("mt-[-8px] font-bold text-gray-300 text-center uppercase tracking-wider", isSmall ? "text-[9px]" : "text-xs")}>{label}</div>
     </div>
   );
 };

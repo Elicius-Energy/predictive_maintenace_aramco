@@ -8,7 +8,7 @@ import 'katex/dist/katex.min.css';
 import { useChat } from '../../contexts/ChatContext';
 import { useMachine } from '../../contexts/MachineContext';
 import api from '../../utils/api';
-import { MessageSquare, X, Send, User, Bot } from 'lucide-react';
+import { MessageSquare, X, Send, User, Bot, Sparkles } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -20,11 +20,18 @@ const ChatBotBubble: FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(true);
   
   const { messages, setMessages } = useChat();
   const { activeMachine } = useMachine();
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-hide tooltip after 5 seconds
+  useEffect(() => {
+    const timer = setTimeout(() => setShowTooltip(false), 5000);
+    return () => clearTimeout(timer);
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -33,6 +40,7 @@ const ChatBotBubble: FC = () => {
   useEffect(() => {
     if (isOpen) {
       scrollToBottom();
+      setShowTooltip(false);
     }
   }, [messages, isOpen, isTyping]);
 
@@ -75,16 +83,78 @@ const ChatBotBubble: FC = () => {
 
   return (
     <>
-      {/* Floating Action Button */}
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className={cn(
-          "fixed bottom-6 right-6 w-14 h-14 rounded-full flex items-center justify-center text-white shadow-xl transition-all duration-300 z-50",
-          isOpen ? "bg-accent-red hover:bg-red-700 rotate-90" : "bg-primary hover:bg-primary-dark"
+      {/* ── Floating Action Button with Glow ── */}
+      <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3">
+        {/* Tooltip label */}
+        {!isOpen && showTooltip && (
+          <div 
+            className="px-3 py-1.5 rounded-lg text-xs font-bold text-white whitespace-nowrap"
+            style={{
+              background: 'linear-gradient(135deg, #0891b2 0%, #0d9488 100%)',
+              boxShadow: '0 4px 16px rgba(8, 145, 178, 0.3)',
+              animation: 'tooltip-fade-in 0.4s ease-out forwards',
+            }}
+          >
+            <div className="flex items-center gap-1.5">
+              <Sparkles size={12} />
+              Ask AI Assistant
+            </div>
+            {/* Arrow */}
+            <div 
+              className="absolute top-1/2 -translate-y-1/2 -right-1.5 w-3 h-3 rotate-45"
+              style={{ background: '#0d9488' }}
+            />
+          </div>
         )}
-      >
-        {isOpen ? <X size={24} /> : <MessageSquare size={24} />}
-      </button>
+
+        {/* Hover tooltip (persistent) */}
+        {!isOpen && !showTooltip && (
+          <div className="opacity-0 group-hover:opacity-100 transition-opacity px-2.5 py-1 rounded-lg bg-gray-900 text-white text-[10px] font-bold whitespace-nowrap pointer-events-none">
+            AI Assistant
+          </div>
+        )}
+
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          onMouseEnter={() => !isOpen && setShowTooltip(false)}
+          className="group relative"
+        >
+          {/* Outer glow ring */}
+          {!isOpen && (
+            <div 
+              className="absolute inset-0 rounded-full"
+              style={{
+                animation: 'chatbot-glow 2.5s ease-in-out infinite',
+                borderRadius: '50%',
+              }}
+            />
+          )}
+          
+          {/* Button */}
+          <div
+            className={cn(
+              "relative w-16 h-16 rounded-full flex items-center justify-center text-white shadow-xl transition-all duration-300",
+              isOpen 
+                ? "bg-accent-red hover:bg-red-700 rotate-90" 
+                : "hover:scale-110"
+            )}
+            style={!isOpen ? {
+              background: 'linear-gradient(135deg, #0891b2 0%, #0d9488 50%, #06b6d4 100%)',
+              boxShadow: '0 6px 24px rgba(8, 145, 178, 0.4), inset 0 1px 0 rgba(255,255,255,0.2)',
+              animation: 'chatbot-entrance 0.6s ease-out',
+            } : undefined}
+          >
+            {isOpen ? <X size={24} /> : <MessageSquare size={24} />}
+            
+            {/* Notification dot when there are unread */}
+            {!isOpen && messages.length > 0 && (
+              <div className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-accent-red text-white text-[9px] flex items-center justify-center rounded-full font-bold shadow-md animate-bounce">
+                {messages.length}
+              </div>
+            )}
+          </div>
+        </button>
+      </div>
 
       {/* Chat Window */}
       <div
@@ -94,13 +164,18 @@ const ChatBotBubble: FC = () => {
         )}
       >
         {/* Header */}
-        <div className="p-4 border-b border-border bg-gradient-to-r from-primary to-cyan-500 rounded-t-2xl flex items-center gap-3">
-          <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
+        <div className="p-4 border-b border-border rounded-t-2xl flex items-center gap-3" style={{
+          background: 'linear-gradient(135deg, #0891b2 0%, #0d9488 50%, #06b6d4 100%)',
+        }}>
+          <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
             <Bot size={18} className="text-white" />
           </div>
           <div>
             <h3 className="text-sm font-bold text-white">AI Maintenance Assistant</h3>
             <p className="text-[10px] text-cyan-100">Powered by Elicius Energy</p>
+          </div>
+          <div className="ml-auto">
+            <Sparkles size={16} className="text-cyan-200 animate-pulse" />
           </div>
         </div>
 
