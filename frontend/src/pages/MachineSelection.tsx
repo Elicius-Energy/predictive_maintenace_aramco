@@ -7,7 +7,6 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import api from '../utils/api';
 import MotorDetailsForm from './MotorDetailsForm';
-import Layout from '../components/layout/Layout';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
