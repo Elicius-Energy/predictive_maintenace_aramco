@@ -1,29 +1,70 @@
 services:
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+  db:
+    image: timescale/timescaledb-ha:pg16
+    container_name: ledl-timescaledb
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-ledl_energy}
     ports:
-      - "8000:8000"
+      - "5432:5432"
     volumes:
-      - ./backend/data:/app/data
-      - backend-logs:/app/data/logs
-    env_file:
-      - .env
+      - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
     deploy:
       resources:
         limits:
-          memory: 4G
+          memory: 1.5G
           cpus: '2.0'
         reservations:
-          memory: 1G
+          memory: 256M
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ledl_energy}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - internal
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ledl-backend-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./backend/data:/app/backend_data:ro
+      - ./backend/data/reports:/app/data/reports
+      - ./kb:/kb:ro
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-ledl_energy}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1.2G
+          cpus: '2.0'
+        reservations:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 15s
+      timeout: 5s
       retries: 3
-      start_period: 60s
+      start_period: 30s
     logging:
       driver: json-file
       options:
@@ -36,6 +77,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    container_name: ledl-frontend-ui
     ports:
       - "80:8080"
     depends_on:
@@ -49,7 +91,7 @@ services:
           cpus: '0.5'
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/"]
-      interval: 30s
+      interval: 20s
       timeout: 5s
       retries: 3
     logging:
@@ -60,37 +102,26 @@ services:
     networks:
       - internal
 
-  mqtt-broker:
-    image: eclipse-mosquitto:latest
-    ports:
-      - "1883:1883"
+  simulator:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ledl-simulator
+    profiles:
+      - simulator
+    command: ["python", "/app/simulator/publish_readings.py", "--backend-url", "http://backend:8000/api/ingest", "--interval", "10"]
     volumes:
-      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - mosquitto-data:/mosquitto/data
-      - mosquitto-log:/mosquitto/log
+      - ./simulator:/app/simulator:ro
+    depends_on:
+      backend:
+        condition: service_healthy
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-          cpus: '0.25'
-    healthcheck:
-      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "3"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    logging:
-      driver: json-file
-      options:
-        max-size: "5m"
-        max-file: "3"
     networks:
       - internal
 
 volumes:
-  mosquitto-data:
-  mosquitto-log:
-  backend-logs:
+  pgdata:
+    driver: local
 
 networks:
   internal:

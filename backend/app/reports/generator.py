@@ -13,6 +13,7 @@ from app.database import db
 from app.rag.openai_client import ai_client
 from dateutil import parser
 import math
+from xml.sax.saxutils import escape
 
 def strip_markdown(text: str) -> str:
     """Remove markdown and LaTeX from LLM response."""
@@ -65,7 +66,8 @@ def create_plot(title, timestamps, lines, y_label):
     
     return Image(buf, width=420, height=210)
 
-async def generate_pdf_report(machine_id: str, start_time: str, end_time: str) -> io.BytesIO:
+async def generate_pdf_report(machine_id: str, start_time: str, end_time: str, report_data: dict | None = None) -> io.BytesIO:
+    report_data = report_data or {}
     # 1. Fetch data
     # Parse dates safely
     try:
@@ -285,9 +287,117 @@ CRITICAL INSTRUCTIONS FOR FORMATTING:
     elements = []
     
     # Header
-    elements.append(Paragraph(f"Motor Diagnostics Report: {machine_id}", title_style))
+    elements.append(Paragraph("ELICIUS ENERGY PRIVATE LIMITED", title_style))
+    elements.append(Paragraph("MOTOR ENERGY READING REPORT", section_style))
+    elements.append(Paragraph(f"Report No.: {escape(str(report_data.get('report_number') or ''))} &nbsp;&nbsp; Date: {escape(str(report_data.get('report_date') or datetime.utcnow().strftime('%Y-%m-%d')))}", subtitle_style))
+    elements.append(Paragraph(f"Asset: {escape(str(report_data.get('machine_name') or motor_config.get('motorName') or machine_id))}", subtitle_style))
     elements.append(Paragraph(f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC", subtitle_style))
     elements.append(Paragraph(f"Period: {dt_start.strftime('%Y-%m-%d %H:%M')} to {dt_end.strftime('%Y-%m-%d %H:%M')}", subtitle_style))
+
+    def add_section(title: str, rows: list[tuple[str, object]]):
+        elements.append(Paragraph(title, section_style))
+        safe_rows = [[Paragraph(escape(str(label)), body_style), Paragraph(escape(str(value)) if str(value) else "", body_style)] for label, value in rows]
+        table = Table(safe_rows, colWidths=[190, 320])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#e9eff8')),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#111827')),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.white),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        elements.append(table)
+        elements.append(Spacer(1, 8))
+
+    add_section("1. Customer Information", [
+        ("Customer", report_data.get("customer", "")),
+        ("Location", report_data.get("location") or motor_config.get("location", "")),
+        ("Department", report_data.get("department", "")),
+        ("Contact Person", report_data.get("contact_person", "")),
+        ("Contact Number", report_data.get("contact_number", "")),
+    ])
+    add_section("2. Motor Name Plate Details", [
+        ("Make", motor_config.get("manufacturer", "")),
+        ("Motor Rating", f"{motor_config.get('ratedPower', '')} kW" if motor_config.get("ratedPower") else ""),
+        ("Frame Size", motor_config.get("frameSize", "")),
+        ("Rated Current", f"{motor_config.get('ratedCurrent', '')} A" if motor_config.get("ratedCurrent") else ""),
+        ("Rated Speed", f"{motor_config.get('ratedSpeed', '')} RPM" if motor_config.get("ratedSpeed") else ""),
+        ("Rated Voltage", f"{motor_config.get('ratedVoltage', '')} V" if motor_config.get("ratedVoltage") else ""),
+        ("Connection", motor_config.get("connection", "")),
+        ("Duty", motor_config.get("duty", "")),
+        ("Insulation Class", motor_config.get("insulationClass", "")),
+        ("Motor Type", motor_config.get("motorType", "")),
+        ("Serial Number", motor_config.get("serialNumber", "")),
+    ])
+    add_section("3. Machine Details", [
+        ("Machine Name", report_data.get("machine_name") or motor_config.get("motorName", "")),
+        ("Make", report_data.get("machine_make", "")),
+        ("Model No.", report_data.get("machine_model", "")),
+        ("Count", report_data.get("machine_count", "")),
+        ("TPI", report_data.get("tpi", "")),
+        ("Raw Material", report_data.get("raw_material", "")),
+        ("Machine RPM - Maximum", report_data.get("machine_rpm_max", "")),
+        ("Machine RPM - Average", report_data.get("machine_rpm_average", "")),
+        ("No. of Spindles", report_data.get("spindle_count", "")),
+    ])
+    add_section("4. Inverter Details", [("Make", report_data.get("inverter_make", "")), ("Model", report_data.get("inverter_model", ""))])
+
+    def numeric_field(name: str) -> float:
+        try:
+            return float(report_data.get(name) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    before_kw = numeric_field("before_kw")
+    after_kw = numeric_field("after_kw")
+    annual_hours = numeric_field("annual_hours")
+    tariff = numeric_field("electricity_tariff")
+    motor_investment = numeric_field("motor_investment")
+    installation_cost = numeric_field("installation_cost")
+    annual_kwh_saving = (before_kw - after_kw) * annual_hours
+    annual_money_saving = annual_kwh_saving * tariff
+    total_investment = motor_investment + installation_cost
+    payback_years = total_investment / annual_money_saving if annual_money_saving > 0 else 0
+    add_section("5. Energy Saving Calculation and ROI", [
+        ("Before motor consumption", f"{before_kw:.3f} kWh/hr"),
+        ("After motor consumption", f"{after_kw:.3f} kWh/hr"),
+        ("Energy saving per hour", f"{before_kw - after_kw:.3f} kWh/hr"),
+        ("Annual operating hours", f"{annual_hours:.0f} hrs/year"),
+        ("Annual energy saving", f"{annual_kwh_saving:.2f} kWh/year"),
+        ("Electricity tariff", f"Rs. {tariff:.2f} / kWh"),
+        ("Annual monetary saving", f"Rs. {annual_money_saving:,.2f} / year"),
+        ("Motor investment", f"Rs. {motor_investment:,.2f}"),
+        ("Installation / modification cost", f"Rs. {installation_cost:,.2f}"),
+        ("Total investment", f"Rs. {total_investment:,.2f}"),
+        ("ROI / Payback period", f"{payback_years:.2f} years" if payback_years else "Not available"),
+        ("Monthly saving", f"Rs. {annual_money_saving / 12:,.2f} / month"),
+        ("Monthly energy saving", f"{annual_kwh_saving / 12:.2f} kWh/month"),
+    ])
+    add_section("6. Measured Data for Selected Period", [
+        ("Average line voltage", f"{avg_v:.1f} V"),
+        ("Average total current", f"{avg_i:.2f} A"),
+        ("Average active power", f"{avg_p:.2f} kW"),
+        ("Maximum active power", f"{max_p:.2f} kW"),
+        ("Average power factor", f"{avg_pf:.3f}"),
+        ("Minimum power factor", f"{min_pf:.3f}"),
+        ("Measured energy consumed", f"{energy_kwh:.2f} kWh"),
+        ("Run time / selected duration", f"{run_hours:.2f} / {total_hours:.2f} hours"),
+    ])
+    add_section("7. Observation / Remarks", [("Remarks", report_data.get("observations", ""))])
+    add_section("8. Customer Confirmation", [
+        ("Customer Name", report_data.get("customer_signatory", "")),
+        ("Designation", report_data.get("customer_designation", "")),
+        ("Signature", report_data.get("customer_signature", "")),
+        ("Date", report_data.get("customer_confirmation_date", "")),
+    ])
+    add_section("9. Elicius Representative", [
+        ("Name", report_data.get("representative_name", "")),
+        ("Designation", report_data.get("representative_designation", "")),
+        ("Signature", report_data.get("representative_signature", "")),
+        ("Date", report_data.get("representative_date", "")),
+    ])
     
     # Motor Details & Period Summary Tables
     elements.append(Paragraph("Asset Configuration & Period Summary", section_style))

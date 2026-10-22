@@ -1,77 +1,87 @@
 """
-Application configuration loaded from environment variables.
+Configuration module for Elicius Energy IoT Monitoring Platform.
+Loads configuration from environment variables with sensible defaults.
 """
-import os
-import secrets
-from datetime import datetime, timezone
-from functools import lru_cache
 from pathlib import Path
+from typing import Optional, List
 from pydantic_settings import BaseSettings
-from typing import Optional, Literal
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from .env file."""
-    
-    # MQTT Configuration
-    MQTT_BROKER_HOST: str = "192.168.68.100"
-    MQTT_BROKER_PORT: int = 1883
-    MQTT_USERNAME: Optional[str] = None
-    MQTT_PASSWORD: Optional[str] = None
-    MQTT_TOPIC_ENERGY: str = "energy/+"
-    MQTT_TOPIC_ACCEL: str = "energy/+/accel"
-    MQTT_TOPIC_LEDL: str = "ledl"
-    MQTT_TOPIC_LEDL2: str = "ledl2"
-    MQTT_CLIENT_ID: str = "predictive_maintenance_backend"
-    MQTT_RECONNECT_DELAY: int = 5
-    MQTT_MAX_RECONNECT_DELAY: int = 60
-    
-    # Database
-    DATABASE_PATH: str = str(Path(__file__).parent.parent / "data" / "sensor_data.db")
-    DATA_RETENTION_HOURS: int = 72
-    
-    # Simulation
-    SIMULATION_MODE: Literal["auto", "always", "never"] = "auto"
-    SIMULATION_INTERVAL_MS: int = 1000
-    
-    # OpenAI API
-    OPENAI_API_KEY: Optional[str] = None
-    OPENAI_MODEL: str = "gpt-4o"
-    RAG_CACHE_TTL_SECONDS: int = 30
-    RAG_AUTO_INTERVAL_SECONDS: int = 60
-    ENABLE_AI_CONTINUOUS_DIAGNOSIS: bool = False
-    RAG_CHAT_RATE_LIMIT: str = "10/minute"
-    
-    # WebSocket
-    WS_HEARTBEAT_INTERVAL: int = 30
-    MAX_WS_CONNECTIONS: int = 100
-    
-    # Feature Engineering
-    FFT_WINDOW_SIZE: int = 256
-    ROLLING_WINDOW_SIZE: int = 60
-    FEATURE_COMPUTE_INTERVAL_MS: int = 2000
-    
-    # Paths
-    KNOWLEDGE_BASE_DIR: str = str(Path(__file__).parent.parent / "data" / "knowledge")
-    FAISS_INDEX_PATH: str = str(Path(__file__).parent.parent / "data" / "faiss_index")
-    SAMPLE_DATA_DIR: str = str(Path(__file__).parent.parent / "data" / "sample_data")
+    # Application & Environment
+    PROJECT_NAME: str = "Elicius Energy IoT Monitoring"
+    ENVIRONMENT: str = "production"
+    LOG_LEVEL: str = "INFO"
+    DISPLAY_TIMEZONE: str = "Asia/Kolkata"
     
     # Server & Security
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000"]
-    ALLOWED_HOSTS: list[str] = ["*"]
-    LOG_LEVEL: str = "INFO"
+    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000", "http://localhost", "http://localhost:8080"]
+    ALLOWED_HOSTS: List[str] = ["*"]
     
-    # Auth (JWT)
-    # Generate random secret key by default, but it will change every restart! Must set in .env
-    JWT_SECRET_KEY: str = secrets.token_hex(32)
+    # Authentication (JWT & Argon2)
+    JWT_SECRET_KEY: str = ""
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRY_MINUTES: int = 480
+    COOKIE_NAME: str = "elicius_access_token"
+    COOKIE_SECURE: Optional[bool] = None
+    LOGIN_MAX_ATTEMPTS: int = 5
+    LOGIN_LOCKOUT_SECONDS: int = 300
     
-    # Admin Account
+    # Default Admin Seed
     ADMIN_USERNAME: str = "admin"
-    ADMIN_PASSWORD_HASH: str = "" # Leave empty for dev mode bypass
+    ADMIN_PASSWORD: str = ""
+    ADMIN_PASSWORD_HASH: Optional[str] = None
+    
+    # Device Ingest Authentication Key
+    DEVICE_KEY: str = "elicius_secret_device_key_2026"
+    
+    # Database (PostgreSQL 16 + TimescaleDB + pgvector)
+    # Default URL points to docker-compose timescale db service, or local postgres
+    DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@db:5432/elicius_energy"
+    # Fallback to local sqlite if POSTGRES is unavailable for quick testing
+    SQLITE_FALLBACK_URL: str = "sqlite:///./data/elicius_energy.db"
+    RAW_DATA_RETENTION_MONTHS: int = 24
+    
+    # MQTT Ingestion (Live IoT Broker)
+    MQTT_ENABLED: bool = True
+    MQTT_BROKER_HOST: str = "node.kaatru.org"
+    MQTT_BROKER_PORT: int = 1883
+    MQTT_USERNAME: Optional[str] = None
+    MQTT_PASSWORD: Optional[str] = None
+    MQTT_TOPIC: str = "ledl"  # Keep original MQTT topic to match the broker
+    MQTT_CLIENT_ID: str = "elicius_energy_backend"
+    MQTT_RECONNECT_DELAY: int = 5
+    MQTT_MAX_RECONNECT_DELAY: int = 300
+    MQTT_TOPIC_ENERGY: str = "ledl/energy"
+    MQTT_TOPIC_ACCEL: str = "ledl/accel"
+    MQTT_TOPIC_LEDL: str = "ledl"
+    MAX_WS_CONNECTIONS: int = 100
+    
+    # AI & RAG Configuration (OpenAI)
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_CHAT_MODEL: str = "gpt-4o-mini"
+    OPENAI_EMBED_MODEL: str = "text-embedding-3-small"
+    RAG_TOP_K: int = 4
+    RAG_CHAT_RATE_LIMIT: str = "10/minute"
+    
+    # SMTP / Alerts (Optional)
+    SMTP_ENABLED: bool = False
+    SMTP_HOST: Optional[str] = None
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_FROM_EMAIL: str = "alerts@eliciusenergy.com"
+    
+    # Paths
+    KB_DIR: str = str(Path(__file__).parent.parent.parent / "kb")
+    REPORTS_DIR: str = str(Path(__file__).parent.parent / "data" / "reports")
+    KNOWLEDGE_BASE_DIR: Optional[str] = None
+    FAISS_INDEX_PATH: str = str(Path(__file__).parent.parent / "data" / "faiss_index")
+    DATABASE_PATH: Optional[str] = None
+    DATA_RETENTION_HOURS: int = 24 * 30
+    FFT_WINDOW_SIZE: int = 1024
     
     class Config:
         env_file = str(Path(__file__).parent.parent.parent / ".env")
@@ -81,12 +91,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-@lru_cache()
-def _get_cached_settings() -> Settings:
-    return Settings()
 
 def get_runtime_settings() -> Settings:
-    """Reload settings from `.env` for request-time consumers such as AI clients."""
-    # Cache clearing isn't perfect TTL, but it ensures we don't recreate on every request
-    # while allowing environment variable updates if we flush the cache
-    return _get_cached_settings()
+    """Reload environment configuration for callers that need current settings."""
+    return Settings()

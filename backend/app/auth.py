@@ -7,11 +7,12 @@ from passlib.context import CryptContext
 
 from app.config import get_runtime_settings
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     if not hashed_password:
@@ -52,7 +53,8 @@ def verify_token(token: str) -> dict:
 
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     settings = get_runtime_settings()
-    if not settings.ADMIN_PASSWORD_HASH:
+    environment = settings.ENVIRONMENT
+    if environment == "development" and not settings.ADMIN_PASSWORD_HASH:
         # Dev mode warning
         logger.warning("AUTH WARNING: ADMIN_PASSWORD_HASH is empty! Bypassing authentication (DEV MODE). Do not use in production.")
         # If there's no token, just return a dummy payload instead of failing
@@ -60,9 +62,11 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
             return {"sub": settings.ADMIN_USERNAME, "role": "admin"}
         
     try:
+        if not token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
         return verify_token(token)
     except HTTPException as e:
-        if not settings.ADMIN_PASSWORD_HASH:
+        if environment == "development" and not settings.ADMIN_PASSWORD_HASH:
             return {"sub": settings.ADMIN_USERNAME, "role": "admin"}
         raise e
 

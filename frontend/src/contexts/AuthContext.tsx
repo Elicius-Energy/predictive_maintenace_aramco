@@ -1,60 +1,78 @@
-import React, { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
-import api, { setAccessToken } from '../utils/api';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import axios from 'axios';
 
-interface AuthContextType {
-  isAuthenticated: boolean;
-  isLoading: boolean;
-  login: (token: string) => void;
-  logout: () => void;
+axios.interceptors.request.use((config) => {
+  if (config.method && !['get', 'head', 'options'].includes(config.method.toLowerCase())) {
+    const csrf = document.cookie.split('; ').find((part) => part.startsWith('elicius_csrf='))?.split('=').slice(1).join('=');
+    if (csrf) config.headers.set('X-CSRF-Token', decodeURIComponent(csrf));
+  }
+  return config;
+});
+
+interface User {
+  username: string;
+  role: string;
+  must_change_password?: boolean;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+interface AuthContextType {
+  user: User | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  login: (username: string, password: string, mfaCode?: string) => Promise<void>;
+  logout: () => Promise<void>;
+}
 
-export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Check current session on mount
   useEffect(() => {
-    // Check if user is logged in by hitting the /me endpoint
-    // First need to try checking if token exists in session storage/cookie, but we decided to keep it in memory
-    // For simple persistence across reloads we'll use sessionStorage temporarily until backend issues refresh tokens in httpOnly cookies
-    const token = sessionStorage.getItem('accessToken');
-    if (token) {
-      setAccessToken(token);
-      api.get('/api/auth/me')
-        .then(() => setIsAuthenticated(true))
-        .catch(() => {
-          setAccessToken(null);
-          sessionStorage.removeItem('accessToken');
-          setIsAuthenticated(false);
-        })
-        .finally(() => setIsLoading(false));
-    } else {
-      setIsLoading(false);
-    }
-
-    const handleLogout = () => {
-      logout();
+    const checkAuth = async () => {
+      try {
+        const res = await axios.get('/api/auth/me', { withCredentials: true });
+        setUser(res.data);
+      } catch {
+        setUser(null);
+      } finally {
+        setIsLoading(false);
+      }
     };
-
-    window.addEventListener('auth:logout', handleLogout);
-    return () => window.removeEventListener('auth:logout', handleLogout);
+    checkAuth();
   }, []);
 
-  const login = (token: string) => {
-    setAccessToken(token);
-    sessionStorage.setItem('accessToken', token);
-    setIsAuthenticated(true);
+  const login = async (username: string, password: string, mfaCode?: string) => {
+    const res = await axios.post(
+      '/api/auth/login',
+      { username, password, mfa_code: mfaCode || null },
+      { withCredentials: true }
+    );
+    setUser(res.data);
   };
 
-  const logout = () => {
-    setAccessToken(null);
-    sessionStorage.removeItem('accessToken');
-    setIsAuthenticated(false);
+  const logout = async () => {
+    try {
+      await axios.post('/api/auth/logout', {}, { withCredentials: true });
+    } catch {
+      // Ignore logout errors
+    } finally {
+      setUser(null);
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, login, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        isAuthenticated: !!user,
+        isLoading,
+        login,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
@@ -62,7 +80,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;

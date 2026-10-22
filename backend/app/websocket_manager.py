@@ -20,7 +20,7 @@ class ConnectionManager:
         self._lock = asyncio.Lock()
         self.error_counts: Dict[WebSocket, int] = {}
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, subprotocol: str = None):
         """Accept a new connection."""
         settings = get_runtime_settings()
         
@@ -30,7 +30,7 @@ class ConnectionManager:
                 await websocket.close(code=1008, reason="Max connections reached")
                 return False
                 
-            await websocket.accept()
+            await websocket.accept(subprotocol=subprotocol)
             self.active_connections.append(websocket)
             self.error_counts[websocket] = 0
             logger.info(f"New client connected. Total: {len(self.active_connections)}")

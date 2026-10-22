@@ -11,8 +11,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["ws"])
 
 @router.websocket("/ws/stream")
-async def websocket_endpoint(websocket: WebSocket, token: str = Query(None)):
+async def websocket_endpoint(websocket: WebSocket):
     """Main WebSocket endpoint for real-time data."""
+    # 1. Authenticate via subprotocol instead of query string
+    token = None
+    if "sec-websocket-protocol" in websocket.headers:
+        protocols = websocket.headers.get("sec-websocket-protocol", "").split(",")
+        if len(protocols) >= 2 and protocols[0].strip() == "access_token":
+            token = protocols[1].strip()
+            
+    # Accept the subprotocol explicitly if token is provided
+    # The actual accept will happen in ws_manager.connect
+    subprotocol = "access_token" if token else None
+    
     # 1. Authenticate via token before fully accepting
     if not token or token == "undefined" or token == "null":
         # In dev mode we might allow it without token, but check config
@@ -33,7 +44,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(None)):
             return
 
     # 2. Connect via manager (handles max connections check)
-    connected = await ws_manager.connect(websocket)
+    connected = await ws_manager.connect(websocket, subprotocol=subprotocol)
     if not connected:
         return # Manager already closed it with 1008
         

@@ -84,6 +84,114 @@ async def get_alerts(
     safe_id = validate_machine_id(machine_id)
     return db.get_alerts(safe_id, minutes, start_time=start_time, end_time=end_time)
 
+@router.get("/historical_analysis")
+async def historical_analysis(
+    machine_id: str = Query(..., description="ID of the machine"),
+    start_time: str = Query(..., description="Start ISO time"),
+    end_time: str = Query(..., description="End ISO time"),
+    interval: str = Query("1m", description="1m, 5m, 1h"),
+    parameter: str = Query("power", description="power, energy, voltage, current, pf, frequency"),
+    parameters: str = Query(None, description="Comma-separated series: voltage_l1,voltage_l2,voltage_l3,current_l1,current_l2,current_l3,total_current,power,pf,frequency,energy"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Return the latest absolute reading in each interval, with zeroes for gaps."""
+    safe_id = validate_machine_id(machine_id)
+    interval_seconds = {"1m": 60, "5m": 300, "10m": 600, "15m": 900, "1h": 3600}
+    if interval not in interval_seconds:
+        raise HTTPException(status_code=400, detail="Unsupported interval")
+
+    series_fields = {
+        "voltage_l1": ("v1n", "voltage"),
+        "voltage_l2": ("v2n",),
+        "voltage_l3": ("v3n",),
+        "current_l1": ("i1",),
+        "current_l2": ("i2",),
+        "current_l3": ("i3",),
+        "total_current": ("i_avg", "current"),
+        "power": ("t_kw", "active_power"),
+        "pf": ("pf_avg", "power_factor"),
+        "frequency": ("frequency",),
+        "energy": ("kwh_imp", "energy_cumulative"),
+    }
+    requested = [key.strip() for key in parameters.split(",")] if parameters else []
+    legacy_parameter = not requested
+    if legacy_parameter:
+        requested = {
+            "voltage": ["voltage_l1"],
+            "current": ["total_current"],
+        }.get(parameter, [parameter])
+    unknown = set(requested) - set(series_fields)
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unsupported parameter: {sorted(unknown)[0]}")
+
+    since = get_iso_bound(start_time, is_end=False)
+    until = get_iso_bound(end_time, is_end=True)
+
+    def parse_utc(value: str) -> datetime:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+
+    start_dt = parse_utc(start_time)
+    end_dt = parse_utc(end_time)
+    if end_dt < start_dt:
+        raise HTTPException(status_code=400, detail="end_time must be after start_time")
+    step = interval_seconds[interval]
+    start_epoch = int(start_dt.timestamp()) // step * step
+    end_epoch = int(end_dt.timestamp()) // step * step
+    interval_values: Dict[int, Dict[str, float]] = {}
+    previous_energy_counter = None
+    
+    with db._get_conn() as conn:
+        if "energy" in requested:
+            previous_row = conn.execute("""
+                SELECT feature_data FROM features
+                WHERE machine_id = ? AND timestamp < ?
+                ORDER BY timestamp DESC LIMIT 1
+            """, (safe_id, since)).fetchone()
+            if previous_row:
+                previous_fd = json.loads(previous_row["feature_data"]) if isinstance(previous_row["feature_data"], str) else previous_row["feature_data"]
+                previous_el = previous_fd.get("electrical", {})
+                previous_energy_counter = next((previous_el[name] for name in series_fields["energy"] if previous_el.get(name) is not None), None)
+
+        cursor = conn.execute("""
+            SELECT timestamp, feature_data
+            FROM features
+            WHERE machine_id = ? AND timestamp >= ? AND timestamp <= ?
+            ORDER BY timestamp ASC
+        """, (safe_id, since, until))
+        
+        while True:
+            rows = cursor.fetchmany(1000)
+            if not rows:
+                break
+            for row in rows:
+                fd = json.loads(row["feature_data"]) if isinstance(row["feature_data"], str) else row["feature_data"]
+                el = fd.get("electrical", {})
+                ts_epoch = int(parse_utc(row["timestamp"]).timestamp())
+                bucket = ts_epoch // step * step
+                if start_epoch <= bucket <= end_epoch:
+                    # The latest sample in an interval is the absolute reading for that interval.
+                    interval_values[bucket] = {
+                        key: float(next((el[name] for name in series_fields[key] if el.get(name) is not None), 0.0) or 0.0)
+                        for key in requested
+                    }
+
+    results = []
+    for bucket in range(start_epoch, end_epoch + 1, step):
+        values = interval_values.get(bucket, {key: 0.0 for key in requested})
+        if "energy" in values:
+            counter = values["energy"]
+            consumption = max(0.0, counter - previous_energy_counter) if previous_energy_counter is not None else 0.0
+            values["energy"] = consumption
+            if bucket in interval_values:
+                previous_energy_counter = counter
+        item = {"timestamp": datetime.fromtimestamp(bucket, timezone.utc).isoformat()}
+        item.update({key: round(value, 3) for key, value in values.items()})
+        if legacy_parameter:
+            item["value"] = item.pop(requested[0])
+        results.append(item)
+    return results
+
 @router.get("/download_csv")
 async def download_csv(
     machine_id: str = Query("sim-pump-001", description="ID of the machine"),
@@ -233,7 +341,7 @@ async def download_csv(
 @router.get("/machines", response_model=List[MachineInfo])
 async def get_machines(current_user: dict = Depends(get_current_user)):
     """Get list of all monitored machines, sorted by most recent data first."""
-    active_ids = db.get_all_machines()
+    activity_data = db.get_all_machines_with_latest_activity()
     
     # Map device IDs to friendly names
     DEVICE_NAME_MAP = {
@@ -241,12 +349,7 @@ async def get_machines(current_user: dict = Depends(get_current_user)):
         "002D00203335471332323632": "LEDL_Device_2",
     }
     
-    # Sort by most recent feature data so the actively-producing machine is first
-    machines_with_activity = []
-    for mid in active_ids:
-        latest = db.get_latest_reading(machine_id=mid)
-        last_ts = latest.get("timestamp", "") if latest else ""
-        machines_with_activity.append((mid, last_ts))
+    machines_with_activity = [(row["machine_id"], row["last_ts"] or "") for row in activity_data]
     
     # Sort descending by timestamp (most recent first)
     machines_with_activity.sort(key=lambda x: x[1], reverse=True)

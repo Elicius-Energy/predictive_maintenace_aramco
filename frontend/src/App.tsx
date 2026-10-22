@@ -1,64 +1,70 @@
-import type { FC } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { MachineProvider } from './contexts/MachineContext';
-import { WebSocketProvider } from './contexts/WebSocketContext';
-import { HistoryProvider } from './contexts/HistoryContext';
-import { ChatProvider } from './contexts/ChatContext';
-import { MotorDetailsProvider } from './contexts/MotorDetailsContext';
-import Layout from './components/layout/Layout';
-
-// Real Pages
-import MachineSelection from './pages/MachineSelection';
-import DashboardOverview from './pages/DashboardOverview';
-
+import { DeviceProvider } from './contexts/DeviceContext';
+import { Navbar } from './components/layout/Navbar';
+import { AppBackdrop } from './components/layout/AppBackdrop';
+import { FloatingChat } from './components/chat/FloatingChat';
 import Login from './pages/Login';
+import Configuration from './pages/Configuration';
+import Dashboard from './pages/Dashboard';
+import Reports from './pages/Reports';
+import UserManagement from './pages/UserManagement';
+import ChangePassword from './pages/ChangePassword';
 
-// Protected Route Wrapper using AuthContext
-const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { isAuthenticated, isLoading } = useAuth();
-  
+// Protected Route Wrapper
+const ProtectedRoute: React.FC = () => {
+  const { isAuthenticated, isLoading, user } = useAuth();
+
   if (isLoading) {
-    return <div className="min-h-screen flex items-center justify-center bg-gray-50"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div></div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="w-8 h-8 border-4 border-[#1F3A8A] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
   }
-  
+
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
-  
-  return <>{children}</>;
+
+  if (user?.must_change_password) return <ChangePassword />;
+
+  return (
+    <DeviceProvider>
+      <div className="relative min-h-screen flex flex-col font-sans text-slate-900">
+        {/* Plant photograph backdrop, pinned behind every authenticated screen */}
+        <AppBackdrop />
+        <div className="relative z-10 flex flex-col flex-1">
+          <Navbar />
+          <main className="flex-1">
+            <Outlet />
+          </main>
+          {/* Floating Chatbot visible on all three pages */}
+          <FloatingChat />
+        </div>
+      </div>
+    </DeviceProvider>
+  );
 };
 
-// Smart redirect from root
-const RootRedirect = () => {
-  return <Navigate to="/machines" replace />;
-};
-
-const App: FC = () => {
+export const App: React.FC = () => {
   return (
     <AuthProvider>
-      <MachineProvider>
-        <MotorDetailsProvider>
-          <WebSocketProvider>
-            <HistoryProvider>
-              <ChatProvider>
-                <BrowserRouter>
-                  <Routes>
-                    <Route path="/login" element={<Login />} />
-                    <Route path="/" element={<ProtectedRoute><RootRedirect /></ProtectedRoute>} />
-                    <Route path="/machines" element={<ProtectedRoute><MachineSelection /></ProtectedRoute>} />
-                    <Route path="/dashboard" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-                      <Route index element={<DashboardOverview />} />
-                      <Route path="*" element={<Navigate to="/dashboard" replace />} />
-                    </Route>
-                    <Route path="*" element={<Navigate to="/" replace />} />
-                  </Routes>
-                </BrowserRouter>
-              </ChatProvider>
-            </HistoryProvider>
-          </WebSocketProvider>
-        </MotorDetailsProvider>
-      </MachineProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          
+          <Route element={<ProtectedRoute />}>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/config" element={<Configuration />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/users" element={<UserManagement />} />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
     </AuthProvider>
   );
 };

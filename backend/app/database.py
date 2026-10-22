@@ -82,6 +82,8 @@ class Database:
                 
                 CREATE INDEX IF NOT EXISTS idx_features_ts 
                     ON features(timestamp);
+                CREATE INDEX IF NOT EXISTS idx_features_machine_ts
+                    ON features(machine_id, timestamp);
                 
                 CREATE TABLE IF NOT EXISTS alerts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -337,6 +339,21 @@ class Database:
             """, (since,)).fetchall()
         return [row["machine_id"] for row in rows]
 
+    def get_all_machines_with_latest_activity(self) -> List[Dict]:
+        """Get list of all machines with their most recent reading timestamp."""
+        with self._get_conn() as conn:
+            rows = conn.execute("""
+                SELECT m.machine_id, MAX(s.timestamp) as last_ts
+                FROM (
+                    SELECT DISTINCT machine_id FROM sensor_readings
+                    UNION
+                    SELECT DISTINCT machine_id FROM motor_configs
+                ) m
+                LEFT JOIN sensor_readings s ON m.machine_id = s.machine_id
+                GROUP BY m.machine_id
+            """).fetchall()
+        return [dict(row) for row in rows]
+    
     def get_all_machines(self) -> List[str]:
         """Get list of all machine IDs that have ever sent data or have configs."""
         with self._get_conn() as conn:

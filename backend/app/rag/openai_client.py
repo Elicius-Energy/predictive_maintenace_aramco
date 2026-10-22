@@ -20,7 +20,7 @@ class OpenAIClient:
     
     def __init__(self):
         self.api_key = None
-        self.model = settings.OPENAI_MODEL
+        self.model = settings.OPENAI_CHAT_MODEL
         self.client = None
         self._last_api_key = None
         self._refresh_client()
@@ -33,17 +33,18 @@ class OpenAIClient:
             # Settings haven't changed, keep using the same client
             return
             
-        self.api_key = runtime_settings.OPENAI_API_KEY
+        self.api_key = (runtime_settings.OPENAI_API_KEY or "").strip()
         self._last_api_key = self.api_key
-        self.model = runtime_settings.OPENAI_MODEL
-        self.client = AsyncOpenAI(api_key=self.api_key, timeout=30.0, max_retries=3) if self.api_key else None
+        self.model = runtime_settings.OPENAI_CHAT_MODEL
+        usable_key = self.api_key.startswith("sk-") and not self.api_key.lower().startswith(("your_", "replace_", "sk-your"))
+        self.client = AsyncOpenAI(api_key=self.api_key, timeout=30.0, max_retries=3) if usable_key else None
 
     def _fallback_chat_response(self, reason: str) -> str:
         return (
             "AI analysis is temporarily unavailable from OpenAI, so I am falling back to a local summary. "
             f"Reason: {reason}. "
             f"Current model from `.env`: {self.model or 'not set'}. "
-            "Please verify that the backend is running and that `OPENAI_API_KEY` and `OPENAI_MODEL` are valid in `.env`."
+            "Please verify that the backend is running and that `OPENAI_API_KEY` and `OPENAI_CHAT_MODEL` are valid in the server environment."
         )
             
     async def get_diagnosis(self, fv: FeatureVector, recent_alerts: list[Alert]) -> Optional[FaultDiagnosis]:

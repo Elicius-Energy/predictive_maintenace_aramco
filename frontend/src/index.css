@@ -1,331 +1,165 @@
 @import "tailwindcss";
 
 /* ══════════════════════════════════════════════════════════════
-   macOS Sequoia-Inspired Dark Theme
-   – Warm dark grays (not cold navy)
-   – Apple system-blue accent (#0A84FF)
-   – Refined glassmorphism with warm tint
+   Elicius Energy IoT Monitoring Theme
+   – White background
+   – Elicius Navy primary accent (#1F3A8A)
+   – Status colors: Green, Amber, Red, Grey only
+   – High contrast, generous spacing, legible large typography
    ══════════════════════════════════════════════════════════════ */
 
 @theme {
-  --color-primary: #0A84FF; /* Apple system-blue */
-  --color-primary-light: #409CFF;
-  --color-primary-dark: #0066CC;
-  --color-accent-amber: #FFD60A; /* Apple system-yellow */
-  --color-accent-amber-light: rgba(255, 214, 10, 0.12);
-  --color-accent-red: #FF453A; /* Apple system-red */
-  --color-accent-red-light: rgba(255, 69, 58, 0.12);
-  --color-accent-green: #30D158; /* Apple system-green */
-  --color-accent-green-light: rgba(48, 209, 88, 0.12);
-  --color-phase-l1: #FF453A;
-  --color-phase-l2: #FFD60A;
-  --color-phase-l3: #409CFF;
-  --color-surface: #1c1c1e;       /* macOS dark bg */
-  --color-surface-alt: #2c2c2e;   /* elevated surface */
-  --color-surface-muted: #3a3a3c; /* tertiary surface */
-  --color-border: rgba(255, 255, 255, 0.12);
-  --color-border-light: rgba(255, 255, 255, 0.06);
-  --color-text-primary: #ffffff;  /* Pure white for maximum brightness */
-  --color-text-secondary: #e2e8f0; /* Bright, legible secondary */
-  --color-text-muted: #cbd5e1;    /* Much brighter muted text */
+  --color-elicius-navy: #1F3A8A;
+  --color-elicius-navy-hover: #1E3A8A;
+  --color-elicius-navy-light: #EEF2FF;
+  --color-accent-cyan: #0891B2;
+  --color-accent-violet: #7C3AED;
+  --color-accent-coral: #EA580C;
+  --color-status-green: #16A34A;
+  --color-status-amber: #D97706;
+  --color-status-red: #DC2626;
+  --color-status-grey: #64748B;
+  --color-surface-white: #FFFFFF;
+  --color-surface-bg: #F8FAFC;
+  --color-surface-card: #FFFFFF;
+  --color-border-subtle: #E2E8F0;
+  --color-text-main: #0F172A;
+  --color-text-muted: #64748B;
 }
 
 @layer base {
   :root {
-    color: #f5f5f7;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+    color: #0F172A;
+    background-color: #F8FAFC;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   }
-}
 
-@layer base {
   body {
-    @apply text-text-primary overflow-x-hidden;
-    background: #1c1c1e;
-    background-image:
-      radial-gradient(ellipse at 15% 10%, rgba(10, 132, 255, 0.04) 0%, transparent 50%),
-      radial-gradient(ellipse at 85% 90%, rgba(48, 209, 88, 0.03) 0%, transparent 50%);
-    background-attachment: fixed;
+    background-color: #F8FAFC;
+    color: #0F172A;
+    margin: 0;
+    padding: 0;
     min-height: 100vh;
-  }
-  
-  .static-bg {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    z-index: 0;
-    background-image: url('/bg.png');
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    opacity: 0.25; /* Subtle transparency so it doesn't overpower the dark theme */
-    pointer-events: none;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
   }
 }
 
+/* ══════════════════════════════════════════════════════════════
+   Surfaces layered over the plant backdrop.
+   The photograph is deliberately veiled so it reads as texture
+   only — data panels stay near-opaque for chart legibility.
+   ══════════════════════════════════════════════════════════════ */
 @layer components {
-  /* ─── macOS Liquid Glass Card ─── */
-  .industrial-card {
-    background: rgba(44, 44, 46, 0.55);
-    backdrop-filter: blur(40px) saturate(190%) brightness(1.1);
-    -webkit-backdrop-filter: blur(40px) saturate(190%) brightness(1.1);
-    border: 0.5px solid rgba(255, 255, 255, 0.10);
-    border-radius: 14px;
-    box-shadow:
-      0 2px 20px -4px rgba(0, 0, 0, 0.35),
-      0 0.5px 1px rgba(0, 0, 0, 0.20),
-      inset 0 0.5px 0 rgba(255, 255, 255, 0.06);
-    transition: box-shadow 0.25s ease, transform 0.2s ease;
+  /* Primary content surface: cards, banners, panels */
+  .surface-card {
+    background-color: rgb(255 255 255 / 0.88);
+    -webkit-backdrop-filter: blur(14px) saturate(135%);
+    backdrop-filter: blur(14px) saturate(135%);
+  }
+
+  /* Secondary surface: inset strips and summary tiles inside a card */
+  .surface-inset {
+    background-color: rgb(248 250 252 / 0.78);
+    -webkit-backdrop-filter: blur(14px) saturate(135%);
+    backdrop-filter: blur(14px) saturate(135%);
+  }
+
+  /* Interactive controls: parameter tabs, preset buttons, chips */
+  .surface-control {
+    background-color: rgb(255 255 255 / 0.72);
+    -webkit-backdrop-filter: blur(10px) saturate(130%);
+    backdrop-filter: blur(10px) saturate(130%);
+  }
+
+  /* Chart plot area — almost opaque so plotted lines stay crisp */
+  .surface-chart {
+    background-color: rgb(255 255 255 / 0.96);
+  }
+
+  /* Navigation chrome */
+  .surface-nav {
+    background-color: rgb(255 255 255 / 0.82);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    backdrop-filter: blur(16px) saturate(140%);
+  }
+
+  /* Dashboard accents add color while keeping metric text and chart areas clear. */
+  .dashboard-page {
+    background-image:
+      radial-gradient(ellipse at 4% 0%, rgb(14 165 233 / 0.09), transparent 30rem),
+      radial-gradient(ellipse at 96% 16%, rgb(139 92 246 / 0.08), transparent 28rem);
+  }
+
+  .dashboard-status {
+    box-shadow: 0 12px 32px -25px rgb(15 23 42 / 0.5);
+  }
+
+  .metric-card {
     position: relative;
     overflow: hidden;
+    box-shadow: 0 8px 24px -22px rgb(15 23 42 / 0.55);
+    transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
   }
 
-  /* macOS-style top highlight */
-  .industrial-card::before {
+  .metric-card::before {
     content: '';
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 0.5px;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      rgba(255, 255, 255, 0.12) 30%,
-      rgba(255, 255, 255, 0.15) 50%,
-      rgba(255, 255, 255, 0.12) 70%,
-      transparent 100%
-    );
-    pointer-events: none;
-    z-index: 1;
+    inset: 0 0 auto;
+    height: 3px;
+    background: var(--metric-accent);
   }
 
-  .industrial-card:hover {
-    box-shadow:
-      0 4px 30px -4px rgba(0, 0, 0, 0.45),
-      0 1px 3px rgba(0, 0, 0, 0.25),
-      inset 0 0.5px 0 rgba(255, 255, 255, 0.10);
-    transform: translateY(-0.5px);
-  }
-
-  /* ─── macOS Sidebar ─── */
-  .glass-sidebar {
-    background: rgba(28, 28, 30, 0.80);
-    backdrop-filter: blur(50px) saturate(200%) brightness(1.05);
-    -webkit-backdrop-filter: blur(50px) saturate(200%) brightness(1.05);
-    border-right: 0.5px solid rgba(255, 255, 255, 0.06);
-    box-shadow:
-      2px 0 20px -4px rgba(0, 0, 0, 0.30),
-      inset -0.5px 0 0 rgba(255, 255, 255, 0.03);
-  }
-
-  /* ─── macOS Toolbar ─── */
-  .glass-topbar {
-    background: rgba(28, 28, 30, 0.75);
-    backdrop-filter: blur(50px) saturate(200%) brightness(1.05);
-    -webkit-backdrop-filter: blur(50px) saturate(200%) brightness(1.05);
-    border-bottom: 0.5px solid rgba(255, 255, 255, 0.06);
-    box-shadow:
-      0 2px 16px -4px rgba(0, 0, 0, 0.30),
-      inset 0 -0.5px 0 rgba(255, 255, 255, 0.03),
-      inset 0 0.5px 0 rgba(255, 255, 255, 0.06);
-  }
-
-  /* ─── macOS Input ─── */
-  .glass-input {
-    background: rgba(28, 28, 30, 0.60);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border: 0.5px solid rgba(255, 255, 255, 0.10);
-    box-shadow:
-      inset 0 1px 3px rgba(0, 0, 0, 0.20),
-      inset 0 0 0 0.5px rgba(255, 255, 255, 0.03);
-    transition: all 0.2s ease;
-    border-radius: 8px;
-  }
-
-  .glass-input:focus {
-    background: rgba(44, 44, 46, 0.70);
-    border-color: rgba(10, 132, 255, 0.50);
-    box-shadow:
-      inset 0 1px 3px rgba(0, 0, 0, 0.20),
-      0 0 0 3px rgba(10, 132, 255, 0.20);
-    outline: none;
-  }
-
-  /* ─── Glass Badge ─── */
-  .glass-badge {
-    background: rgba(28, 28, 30, 0.45);
-    backdrop-filter: blur(16px) saturate(180%);
-    -webkit-backdrop-filter: blur(16px) saturate(180%);
-    border: 0.5px solid rgba(255, 255, 255, 0.06);
-    box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.03);
-  }
-
-  /* ─── Premium Glass Card (ROI section) ─── */
-  .glass-card-premium {
-    background: rgba(44, 44, 46, 0.50);
-    backdrop-filter: blur(40px) saturate(200%) brightness(1.08);
-    -webkit-backdrop-filter: blur(40px) saturate(200%) brightness(1.08);
-    border: 0.5px solid rgba(255, 255, 255, 0.08);
-    border-radius: 14px;
-    box-shadow:
-      0 4px 24px -6px rgba(0, 0, 0, 0.40),
-      0 1px 3px rgba(0, 0, 0, 0.20),
-      inset 0 0.5px 0 rgba(255, 255, 255, 0.06);
-    position: relative;
-    overflow: hidden;
-  }
-
-  .glass-card-premium::before {
+  .metric-card::after {
     content: '';
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 0.5px;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      rgba(10, 132, 255, 0.20) 20%,
-      rgba(255, 255, 255, 0.15) 50%,
-      rgba(10, 132, 255, 0.20) 80%,
-      transparent 100%
-    );
+    width: 84px;
+    height: 84px;
+    right: -30px;
+    top: -38px;
+    border-radius: 50%;
+    background: var(--metric-wash);
     pointer-events: none;
-    z-index: 1;
   }
 
-  .status-healthy {
-    @apply text-accent-green;
+  .metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 14px 28px -22px rgb(15 23 42 / 0.55);
   }
 
-  .status-warning {
-    @apply text-accent-amber;
+  .metric-voltage { --metric-accent: #0EA5E9; --metric-wash: rgb(14 165 233 / 0.12); }
+  .metric-current { --metric-accent: #8B5CF6; --metric-wash: rgb(139 92 246 / 0.12); }
+  .metric-power { --metric-accent: #F97316; --metric-wash: rgb(249 115 22 / 0.13); }
+  .metric-energy { --metric-accent: #10B981; --metric-wash: rgb(16 185 129 / 0.13); }
+  .metric-factor { --metric-accent: #EC4899; --metric-wash: rgb(236 72 153 / 0.11); }
+  .metric-frequency { --metric-accent: #6366F1; --metric-wash: rgb(99 102 241 / 0.12); }
+
+  .dashboard-panel {
+    box-shadow: 0 12px 32px -26px rgb(15 23 42 / 0.5);
   }
 
-  .status-critical {
-    @apply text-accent-red animate-pulse;
-  }
-
-  .scada-number {
-    @apply font-mono tracking-tight;
-  }
-
-  /* ─── Logo Glow Container (macOS style — soft, warm) ─── */
-  .logo-glow {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .logo-glow::after {
-    content: '';
-    position: absolute;
-    inset: -10px;
-    border-radius: 20px;
-    background: radial-gradient(ellipse, rgba(10, 132, 255, 0.10) 0%, transparent 70%);
-    pointer-events: none;
-    animation: logo-pulse 5s ease-in-out infinite;
-  }
-
-  .logo-glow img {
-    filter: drop-shadow(0 0 12px rgba(10, 132, 255, 0.20));
-    transition: filter 0.3s ease;
-  }
-
-  .logo-glow:hover img {
-    filter: drop-shadow(0 0 20px rgba(10, 132, 255, 0.35));
-  }
-
-  /* LEDL logo — warmer glow */
-  .logo-glow-ledl::after {
-    background: radial-gradient(ellipse, rgba(255, 159, 10, 0.08) 0%, transparent 70%);
-  }
-
-  .logo-glow-ledl img {
-    filter: drop-shadow(0 0 10px rgba(255, 159, 10, 0.15));
-  }
-
-  .logo-glow-ledl:hover img {
-    filter: drop-shadow(0 0 16px rgba(255, 159, 10, 0.30));
+  .summary-grid {
+    background-image: linear-gradient(120deg, rgb(224 242 254 / 0.62), rgb(245 243 255 / 0.62) 55%, rgb(236 253 245 / 0.65));
   }
 }
 
-/* ─── Logo Pulse Animation ─── */
-@keyframes logo-pulse {
-  0%, 100% {
-    opacity: 0.5;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.04);
-  }
-}
-
-/* ─── Chatbot FAB Animations ─── */
-@keyframes chatbot-glow {
-  0%, 100% {
-    box-shadow:
-      0 0 0 0 rgba(10, 132, 255, 0.35),
-      0 4px 20px rgba(10, 132, 255, 0.20);
-  }
-  50% {
-    box-shadow:
-      0 0 0 10px rgba(10, 132, 255, 0),
-      0 4px 24px rgba(10, 132, 255, 0.30);
-  }
-}
-
-@keyframes chatbot-entrance {
-  0% {
-    transform: scale(0) rotate(-180deg);
-    opacity: 0;
-  }
-  60% {
-    transform: scale(1.15) rotate(10deg);
-    opacity: 1;
-  }
-  80% {
-    transform: scale(0.95) rotate(-5deg);
-  }
-  100% {
-    transform: scale(1) rotate(0deg);
-    opacity: 1;
-  }
-}
-
-@keyframes tooltip-fade-in {
-  0% {
-    opacity: 0;
-    transform: translateX(8px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-/* macOS-style Scrollbar */
+/* Custom scrollbars */
 ::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: #F1F5F9;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 9999px;
-  border: 1.5px solid transparent;
-  background-clip: padding-box;
-  transition: background 0.2s;
+  background: #CBD5E1;
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.30);
-  border: 1.5px solid transparent;
-  background-clip: padding-box;
+  background: #94A3B8;
+}
+
+/* Subtle transitions */
+.transition-smooth {
+  transition: all 0.2s ease-in-out;
 }

@@ -13,6 +13,12 @@ export interface MotorDetails {
   ratedCurrent: number;     // A
   ratedSpeed: number;       // RPM
   ratedEfficiency: number;  // %
+  frameSize?: string;
+  ratedVoltage?: number;
+  connection?: string;
+  duty?: string;
+  insulationClass?: string;
+  serialNumber?: string;
   motorPrice: number;       // currency
   electricityCost: number;  // per kWh
   nameplateImage: string | null; // base64 data URL

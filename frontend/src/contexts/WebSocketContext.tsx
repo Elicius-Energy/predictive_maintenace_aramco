@@ -36,10 +36,9 @@ export const WebSocketProvider: FC<{ children: ReactNode }> = ({ children }) => 
 
     try {
       const token = getAccessToken();
-      // Add token query parameter for authentication
-      const wsUrl = token ? `${WS_URL}?token=${token}` : WS_URL;
+      const wsUrl = WS_URL;
       
-      const ws = new WebSocket(wsUrl);
+      const ws = token ? new WebSocket(wsUrl, ["access_token", token]) : new WebSocket(wsUrl);
       socketRef.current = ws;
 
       ws.onopen = () => {

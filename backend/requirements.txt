@@ -1,8 +1,13 @@
 # FastAPI & Server
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
+APScheduler==3.11.0
 websockets==14.1
 python-multipart==0.0.18
+SQLAlchemy==2.0.36
+psycopg[binary]==3.2.3
+argon2-cffi==23.1.0
+XlsxWriter==3.2.0
 
 # MQTT
 paho-mqtt==2.1.0
@@ -26,6 +31,7 @@ sentence-transformers==3.3.1
 pypdf==5.1.0
 
 # Auth & Security
+PyJWT==2.10.1
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 slowapi==0.1.9
@@ -35,3 +41,6 @@ bcrypt==4.2.1
 python-dotenv==1.0.1
 matplotlib==3.10.0
 reportlab==4.2.5
+pytest==8.0.0
+httpx==0.26.0
+pytest-asyncio==0.23.5
