@@ -100,12 +100,12 @@ export const Dashboard: React.FC = () => {
   const [endTime, setEndTime] = useState(() => getIstDateAndTime(new Date()).time);
 
   const [interval, setIntervalVal] = useState<'1-minute' | '5-minute' | '1-hour'>('1-minute');
-  // All trend charts start collapsed – a chart only opens when its parameter is clicked.
+  // Default active trend charts: open Current, Active Power, and Voltage by default
   const [activeParams, setActiveParams] = useState<Record<string, boolean>>({
-    current: false,
-    kw: false,
+    kw: true,
+    current: true,
+    voltage: true,
     kwh: false,
-    voltage: false,
     pf: false,
     freq: false,
   });
@@ -296,17 +296,25 @@ export const Dashboard: React.FC = () => {
             {liveData.open_alerts.map((alt: any) => (
               <div
                 key={alt.id}
-                className="flex items-center justify-between p-2.5 bg-white/90 rounded-xl border border-red-200 text-xs text-red-900"
+                className={`flex items-center justify-between p-2.5 bg-white/90 rounded-xl border text-xs ${
+                  alt.severity === 'Warning' ? 'border-amber-200 text-amber-900' : 'border-red-200 text-red-900'
+                }`}
               >
                 <div className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                  {alt.severity === 'Warning' ? (
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                  )}
                   <span className="font-bold">{alt.phase ? `[${alt.phase}] ` : ''}{alt.type.replace(/_/g, ' ').toUpperCase()}:</span>
-                  <span className="text-slate-700">{alt.details?.reason || alt.severity}</span>
+                  <span className="text-slate-700">{alt.details?.reason || alt.details?.message || alt.severity}</span>
                   <span className="text-[11px] text-slate-400">({formatIstTimeOnly(alt.started_at)})</span>
                 </div>
                 <button
                   onClick={() => handleAcknowledge(alt.id)}
-                  className="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white font-medium rounded-md text-[11px] transition-colors cursor-pointer"
+                  className={`px-2.5 py-1 text-white font-medium rounded-md text-[11px] transition-colors cursor-pointer ${
+                    alt.severity === 'Warning' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'
+                  }`}
                 >
                   Acknowledge
                 </button>

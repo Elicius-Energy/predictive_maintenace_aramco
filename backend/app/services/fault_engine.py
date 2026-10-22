@@ -160,16 +160,16 @@ class FaultEngine:
             pf_vals = [float(pf1), float(pf2), float(pf3)]
             phases = ["L1", "L2", "L3"]
 
-            # ── Rule 1: CT Polarity / Direction Incorrect ──────────────────
-            # kw_n < -0.02 kW while i_n > 1.0 A
+            # ── Rule 1: CT Polarity / Direction Incorrect (Reversed Connection)
+            # kw_n < -0.02 kW while i_n > 1.0 A -> Reversed CT wiring
             all_reversed = all(kw < -0.02 and i > active_i for kw, i in zip(kw_vals, i_vals))
             for idx, phase in enumerate(phases):
                 is_reversed = kw_vals[idx] < -0.02 and i_vals[idx] > active_i
-                msg = "All CTs reversed or reverse power flow" if all_reversed else f"CT {phase} wrong direction (negative power {kw_vals[idx]} kW)"
+                msg = "All CTs reversed or reverse power flow" if all_reversed else f"CT {phase} wrong direction / reversed connection: negative active power ({kw_vals[idx]:.2f} kW)"
                 checks[("ct_polarity_incorrect", phase, "Incorrect connection")] = (
                     is_reversed,
                     msg,
-                    {"kw": kw_vals[idx], "i": i_vals[idx], "all_reversed": all_reversed}
+                    {"reason": msg, "kw": kw_vals[idx], "i": i_vals[idx], "all_reversed": all_reversed}
                 )
 
             # ── Rule 2: CT Disconnected ────────────────────────────────────
@@ -179,13 +179,14 @@ class FaultEngine:
             for idx, phase in enumerate(phases):
                 other_active = any(i_vals[o] > active_i for o in range(3) if o != idx)
                 is_ct_disconnected = (v_vals[idx] > v_min) and (i_vals[idx] < i_min) and other_active and not all_stopped
+                msg = f"CT {phase} disconnected (voltage present {v_vals[idx]:.1f} V, current {i_vals[idx]:.3f} A)"
                 checks[("ct_disconnected", phase, "Disconnected")] = (
                     is_ct_disconnected,
-                    f"CT {phase} disconnected (voltage present {v_vals[idx]:.1f} V, current {i_vals[idx]:.3f} A)",
-                    {"v": v_vals[idx], "i": i_vals[idx]}
+                    msg,
+                    {"reason": msg, "v": v_vals[idx], "i": i_vals[idx]}
                 )
 
-            # ── Rule 3: CT Connection Incorrect (Phase Swap) ───────────────
+            # ── Rule 3: CT Connection / Phase Swap (Warning) ───────────────
             # pf_n differs from median of other two by > 0.25 (and kw_n >= -0.02)
             # OR |pf_n| < 0.3 while others > 0.6
             for idx, phase in enumerate(phases):
@@ -197,10 +198,11 @@ class FaultEngine:
                     kw_vals[idx] >= -0.02 and
                     (pf_diff > float(th.get("ct_swap_pf_diff", 0.25)) or (abs(pf_vals[idx]) < 0.3 and all(p > 0.6 for p in other_pfs)))
                 )
-                checks[("ct_connection_incorrect", phase, "Incorrect connection")] = (
+                msg = f"CT {phase} phase swap / PF imbalance (PF={pf_vals[idx]:.2f} vs others={other_median:.2f})"
+                checks[("ct_connection_incorrect", phase, "Warning")] = (
                     is_swap,
-                    f"CT {phase} connection incorrect: phase swap detected (PF={pf_vals[idx]:.2f} vs others={other_median:.2f})",
-                    {"pf": pf_vals[idx], "other_median_pf": other_median, "diff": pf_diff}
+                    msg,
+                    {"reason": msg, "pf": pf_vals[idx], "other_median_pf": other_median, "diff": pf_diff}
                 )
 
             # ── Rule 4: CT Position Changed ────────────────────────────────
@@ -310,6 +312,9 @@ class FaultEngine:
                 state["good_count"] = 0
                 if state["bad_count"] >= n_raise:
                     # Raise or keep open
+                    alert_details = dict(details)
+                    if "reason" not in alert_details:
+                        alert_details["reason"] = message
                     if not open_alert:
                         open_alert = Alert(
                             device_id=device.device_id,
@@ -317,9 +322,12 @@ class FaultEngine:
                             phase=phase,
                             severity=severity,
                             started_at=reading_time,
-                            details=details
+                            details=alert_details
                         )
                         db.add(open_alert)
+                    else:
+                        open_alert.severity = severity
+                        open_alert.details = alert_details
                     active_severities.append(severity)
                     self._update_phase_chips(phase_chips, rule_type, phase, severity, message)
             else:

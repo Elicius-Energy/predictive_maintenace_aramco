@@ -224,31 +224,40 @@ class QueryService:
                 b_kwh = avg_kw * (interval_seconds / 3600.0)
                 prev_cum_kwh += b_kwh
 
+                vll_avg = self._avg([v.get("vll_avg") for v in vals])
+                vln_avg = self._avg([v.get("vln_avg") for v in vals])
+                if vll_avg is not None:
+                    v_avg = round(vll_avg, 1)
+                elif vln_avg is not None:
+                    v_avg = round(vln_avg * 1.732, 1)
+                else:
+                    v_avg = None
+
                 points.append({
                     "ts": dt_str,
                     "kwh": round(b_kwh, 3),
                     "cum_kwh": round(prev_cum_kwh, 3),
                     "kw": round(avg_kw, 2),
-                    "kw1": round(self._avg([v["kw1"] for v in vals]), 2),
-                    "kw2": round(self._avg([v["kw2"] for v in vals]), 2),
-                    "kw3": round(self._avg([v["kw3"] for v in vals]), 2),
-                    "v_avg": round(self._avg([v["vll_avg"] for v in vals]), 1) if self._avg([v["vll_avg"] for v in vals]) is not None else round(self._avg([v["vln_avg"] for v in vals]) * 1.732, 1),
-                    "vll_avg": round(self._avg([v["vll_avg"] for v in vals]), 1) if self._avg([v["vll_avg"] for v in vals]) is not None else None,
-                    "v12": round(self._avg([v["v12"] for v in vals]), 1) if self._avg([v["v12"] for v in vals]) is not None else None,
-                    "v23": round(self._avg([v["v23"] for v in vals]), 1) if self._avg([v["v23"] for v in vals]) is not None else None,
-                    "v31": round(self._avg([v["v31"] for v in vals]), 1) if self._avg([v["v31"] for v in vals]) is not None else None,
-                    "v1n": round(self._avg([v["v1n"] for v in vals]), 1),
-                    "v2n": round(self._avg([v["v2n"] for v in vals]), 1),
-                    "v3n": round(self._avg([v["v3n"] for v in vals]), 1),
-                    "i_avg": round(self._avg([v["i_avg"] for v in vals]), 2),
-                    "i1": round(self._avg([v["i1"] for v in vals]), 2),
-                    "i2": round(self._avg([v["i2"] for v in vals]), 2),
-                    "i3": round(self._avg([v["i3"] for v in vals]), 2),
-                    "pf_avg": round(self._avg([v["pf_avg"] for v in vals]), 2),
-                    "pf1": round(self._avg([v["pf1"] for v in vals]), 2),
-                    "pf2": round(self._avg([v["pf2"] for v in vals]), 2),
-                    "pf3": round(self._avg([v["pf3"] for v in vals]), 2),
-                    "freq": round(self._avg([v["freq"] for v in vals]), 2)
+                    "kw1": self._safe_round(self._avg([v.get("kw1") for v in vals]), 2),
+                    "kw2": self._safe_round(self._avg([v.get("kw2") for v in vals]), 2),
+                    "kw3": self._safe_round(self._avg([v.get("kw3") for v in vals]), 2),
+                    "v_avg": v_avg,
+                    "vll_avg": self._safe_round(vll_avg, 1),
+                    "v12": self._safe_round(self._avg([v.get("v12") for v in vals]), 1),
+                    "v23": self._safe_round(self._avg([v.get("v23") for v in vals]), 1),
+                    "v31": self._safe_round(self._avg([v.get("v31") for v in vals]), 1),
+                    "v1n": self._safe_round(self._avg([v.get("v1n") for v in vals]), 1),
+                    "v2n": self._safe_round(self._avg([v.get("v2n") for v in vals]), 1),
+                    "v3n": self._safe_round(self._avg([v.get("v3n") for v in vals]), 1),
+                    "i_avg": self._safe_round(self._avg([v.get("i_avg") for v in vals]), 2),
+                    "i1": self._safe_round(self._avg([v.get("i1") for v in vals]), 2),
+                    "i2": self._safe_round(self._avg([v.get("i2") for v in vals]), 2),
+                    "i3": self._safe_round(self._avg([v.get("i3") for v in vals]), 2),
+                    "pf_avg": self._safe_round(self._avg([v.get("pf_avg") for v in vals]), 2),
+                    "pf1": self._safe_round(self._avg([v.get("pf1") for v in vals]), 2),
+                    "pf2": self._safe_round(self._avg([v.get("pf2") for v in vals]), 2),
+                    "pf3": self._safe_round(self._avg([v.get("pf3") for v in vals]), 2),
+                    "freq": self._safe_round(self._avg([v.get("freq") for v in vals]), 2)
                 })
 
         return {"points": points, "alert_windows": alert_windows}
@@ -526,6 +535,10 @@ class QueryService:
     def _avg(self, vals: List[Optional[float]]) -> Optional[float]:
         valid = [v for v in vals if v is not None]
         return sum(valid) / len(valid) if valid else None
+
+    @staticmethod
+    def _safe_round(val: Optional[float], decimals: int = 2) -> Optional[float]:
+        return round(val, decimals) if val is not None else None
 
     def _format_duration(self, seconds: float) -> str:
         s = int(seconds)

@@ -207,8 +207,8 @@ def test_rule3_ct_swap_connection_incorrect(db_session):
     for _ in range(3):
         status, chips = engine.evaluate_reading(dev, prof, None, payload_swap, now, db_session)
 
-    assert status == "Incorrect connection"
-    assert chips["ct_l2"] == "Incorrect connection"
+    assert status == "Warning"
+    assert chips["ct_l2"] == "Warning"
     assert "phase swap" in chips["ct_l2_detail"]
 
 
