@@ -111,6 +111,105 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  // Custom Tooltips to clearly identify legacy 1-channel aggregate data vs real 3-phase CT data
+  const CurrentTrendTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload || !payload.length) return null;
+    const item = payload[0]?.payload;
+    const isLegacy = item?.has_3p_current === false || (item?.i1 != null && item?.i1 === item?.i2 && item?.i2 === item?.i3);
+
+    return (
+      <div className="bg-white/95 backdrop-blur-xs p-3 rounded-xl border border-slate-200 shadow-lg text-xs min-w-[220px]">
+        <div className="font-semibold text-slate-700 mb-2 pb-1.5 border-b border-slate-100 flex items-center justify-between">
+          <span>{formatIstDateTime(label)}</span>
+        </div>
+        {isLegacy ? (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-slate-600 font-medium">Average Current:</span>
+              <span className="font-bold text-slate-900">{item?.i_avg ?? item?.i1 ?? 0} A</span>
+            </div>
+            <div className="text-[10px] text-amber-700 font-medium bg-amber-50 px-2 py-0.5 rounded border border-amber-200/60 mt-1">
+              Average Current (Legacy 1-channel)
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-red-600 font-medium flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />
+                I L1:
+              </span>
+              <span className="font-bold text-slate-900">{item?.i1} A</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-amber-600 font-medium flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
+                I L2:
+              </span>
+              <span className="font-bold text-slate-900">{item?.i2} A</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-blue-600 font-medium flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+                I L3:
+              </span>
+              <span className="font-bold text-slate-900">{item?.i3} A</span>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const VoltageTrendTooltip = ({ active, payload, label }: any) => {
+    if (!active || !payload || !payload.length) return null;
+    const item = payload[0]?.payload;
+    const isLegacy = item?.has_3p_voltage === false || (item?.v12 != null && item?.v12 === item?.v23 && item?.v23 === item?.v31);
+
+    return (
+      <div className="bg-white/95 backdrop-blur-xs p-3 rounded-xl border border-slate-200 shadow-lg text-xs min-w-[220px]">
+        <div className="font-semibold text-slate-700 mb-2 pb-1.5 border-b border-slate-100 flex items-center justify-between">
+          <span>{formatIstDateTime(label)}</span>
+        </div>
+        {isLegacy ? (
+          <div className="space-y-1">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-slate-600 font-medium">Average Voltage:</span>
+              <span className="font-bold text-slate-900">{item?.vll_avg ?? item?.v_avg ?? item?.v12 ?? 0} V</span>
+            </div>
+            <div className="text-[10px] text-amber-700 font-medium bg-amber-50 px-2 py-0.5 rounded border border-amber-200/60 mt-1">
+              Average Line Voltage (Legacy 1-channel)
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-red-600 font-medium flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />
+                V12 (L1-L2):
+              </span>
+              <span className="font-bold text-slate-900">{item?.v12} V</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-amber-600 font-medium flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
+                V23 (L2-L3):
+              </span>
+              <span className="font-bold text-slate-900">{item?.v23} V</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-blue-600 font-medium flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+                V31 (L3-L1):
+              </span>
+              <span className="font-bold text-slate-900">{item?.v31} V</span>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Trend chart filters
   const [analysisPreset, setAnalysisPreset] = useState<'1h' | '8h' | '24h' | '7d' | 'custom'>('1h');
   const [startDate, setStartDate] = useState(() => getIstDateAndTime(new Date(Date.now() - 1 * 3600 * 1000)).date);
@@ -757,10 +856,7 @@ export const Dashboard: React.FC = () => {
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
                     <XAxis dataKey="ts" tickFormatter={formatTimeTick} stroke="#94A3B8" fontSize={11} />
                     <YAxis stroke="#94A3B8" fontSize={11} unit=" A" />
-                    <Tooltip
-                      labelFormatter={(lbl) => formatIstDateTime(lbl)}
-                      formatter={(val: any, name: any) => [`${val} A`, name]}
-                    />
+                    <Tooltip content={<CurrentTrendTooltip />} />
                     <Line isAnimationActive={false} type="monotone" dataKey="i1" name="I L1" stroke="#EF4444" strokeWidth={1.5} dot={false} connectNulls={true} />
                     <Line isAnimationActive={false} type="monotone" dataKey="i2" name="I L2" stroke="#F59E0B" strokeWidth={1.5} dot={false} connectNulls={true} />
                     <Line isAnimationActive={false} type="monotone" dataKey="i3" name="I L3" stroke="#3B82F6" strokeWidth={1.5} dot={false} connectNulls={true} />
@@ -856,10 +952,7 @@ export const Dashboard: React.FC = () => {
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
                     <XAxis dataKey="ts" tickFormatter={formatTimeTick} stroke="#94A3B8" fontSize={11} />
                     <YAxis domain={['auto', 'auto']} stroke="#94A3B8" fontSize={11} unit=" V" />
-                    <Tooltip
-                      labelFormatter={(lbl) => formatIstDateTime(lbl)}
-                      formatter={(val: any, name: any) => [`${val} V`, name]}
-                    />
+                    <Tooltip content={<VoltageTrendTooltip />} />
                     <Line isAnimationActive={false} type="monotone" dataKey="v12" name="V12 (L1-L2)" stroke="#EF4444" strokeWidth={1.5} dot={false} connectNulls={true} />
                     <Line isAnimationActive={false} type="monotone" dataKey="v23" name="V23 (L2-L3)" stroke="#F59E0B" strokeWidth={1.5} dot={false} connectNulls={true} />
                     <Line isAnimationActive={false} type="monotone" dataKey="v31" name="V31 (L3-L1)" stroke="#3B82F6" strokeWidth={1.5} dot={false} connectNulls={true} />

@@ -243,6 +243,7 @@ class QueryService:
                 i1_val = self._safe_round(self._avg([v.get("i1") for v in vals]), 2)
                 i2_val = self._safe_round(self._avg([v.get("i2") for v in vals]), 2)
                 i3_val = self._safe_round(self._avg([v.get("i3") for v in vals]), 2)
+                has_3p_current = i1_val is not None
                 if i1_val is None and i_avg_val is not None:
                     i1_val, i2_val, i3_val = i_avg_val, i_avg_val, i_avg_val
 
@@ -251,6 +252,7 @@ class QueryService:
                 v12_val = self._safe_round(self._avg([v.get("v12") for v in vals]), 1)
                 v23_val = self._safe_round(self._avg([v.get("v23") for v in vals]), 1)
                 v31_val = self._safe_round(self._avg([v.get("v31") for v in vals]), 1)
+                has_3p_voltage = v12_val is not None
                 if v12_val is None and v_avg is not None:
                     v12_val, v23_val, v31_val = v_avg, v_avg, v_avg
 
@@ -290,6 +292,8 @@ class QueryService:
                     "i1": i1_val,
                     "i2": i2_val,
                     "i3": i3_val,
+                    "has_3p_current": has_3p_current,
+                    "has_3p_voltage": has_3p_voltage,
                     "pf_avg": pf_avg_val,
                     "pf1": pf1_val,
                     "pf2": pf2_val,
