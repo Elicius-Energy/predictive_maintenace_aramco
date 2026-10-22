@@ -96,7 +96,8 @@ def run_migration():
     src_path = find_source_db()
     logger.info("Found source database at %s", src_path)
 
-    src_conn = sqlite3.connect(str(src_path))
+    src_uri = f"file:{src_path}?immutable=1"
+    src_conn = sqlite3.connect(src_uri, uri=True)
     src_conn.row_factory = sqlite3.Row
 
     # 1. Count records

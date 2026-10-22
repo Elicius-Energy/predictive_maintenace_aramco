@@ -277,7 +277,7 @@ def _auto_migrate_legacy_db(db):
     logger.info("Legacy database detected at %s. Checking if historical data needs migration...", src_db)
     try:
         import sqlite3
-        conn = sqlite3.connect(str(src_db))
+        conn = sqlite3.connect(f"file:{src_db}?immutable=1", uri=True)
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sensor_readings'")
         if not cursor.fetchone():
