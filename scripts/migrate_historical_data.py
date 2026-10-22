@@ -220,27 +220,22 @@ def run_migration():
             d_id = DEVICE_MAP.get(ar["machine_id"], ar["machine_id"])
             ts = parse_iso_or_epoch(ar["timestamp"])
             
-            # Check existing alert to avoid duplicate
             existing_alert = db.query(Alert).filter(
                 Alert.device_id == d_id,
-                Alert.started_at == ts,
-                Alert.message == ar["message"]
+                Alert.started_at == ts
             ).first()
             
             if not existing_alert:
                 new_alert = Alert(
                     device_id=d_id,
+                    type=ar["severity"].title(),
+                    phase="ALL",
+                    severity=ar["severity"].title(),
                     started_at=ts,
                     cleared_at=ts if ar["acknowledged"] else None,
-                    rule_name=ar["severity"].title(),
-                    severity=ar["severity"].title(),
-                    parameter="Telemetry",
-                    message=ar["message"],
-                    value_at_trigger=ar["value"],
-                    threshold=ar["threshold"],
-                    acknowledged=bool(ar["acknowledged"]),
+                    acknowledged_by="admin" if ar["acknowledged"] else None,
                     acknowledged_at=ts if ar["acknowledged"] else None,
-                    acknowledged_by="admin" if ar["acknowledged"] else None
+                    details={"message": ar["message"], "value": ar["value"], "threshold": ar["threshold"]}
                 )
                 db.add(new_alert)
                 alert_count += 1
