@@ -147,7 +147,7 @@ def run_migration():
         cursor = src_conn.cursor()
         cursor.execute("SELECT timestamp, machine_id, voltage, current, active_power, apparent_power, power_factor, energy, frequency FROM sensor_readings ORDER BY id ASC")
         
-        batch_size = 5000
+        batch_size = 2000
         batch = []
         migrated = 0
         is_postgres = (engine.dialect.name == "postgresql")
