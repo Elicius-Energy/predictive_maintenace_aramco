@@ -41,7 +41,7 @@ RUN groupadd -r appuser && useradd -r -g appuser -d /home/appuser -s /sbin/nolog
 COPY . .
 
 # Create required directories
-RUN mkdir -p data/knowledge data/sample_data data/logs \
+RUN mkdir -p data/knowledge data/sample_data data/logs data/reports \
     && chown -R appuser:appuser /app /home/appuser
 
 ENV PYTHONPATH=/app
