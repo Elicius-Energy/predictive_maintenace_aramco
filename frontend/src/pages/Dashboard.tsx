@@ -317,8 +317,45 @@ export const Dashboard: React.FC = () => {
     setActiveParams((prev: Record<string, boolean>) => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const handleAcknowledge = async (alertId: number) => {
-    // Optimistic UI update: immediately remove from banner
+  // Session acknowledgment management:
+  // Warnings acknowledged during this browser session are muted and won't pop up again
+  // on subsequent data points. Closing and reopening the dashboard resets the session.
+  const [sessionAcked, setSessionAcked] = useState<string[]>(() => {
+    try {
+      const raw = sessionStorage.getItem('elicius_session_acked_alerts');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const isAlertAckedInSession = (alt: any) => {
+    if (!alt) return false;
+    const idKey = String(alt.id);
+    const sigKey = `${selectedDeviceId}:${alt.type}:${alt.phase || 'ALL'}`;
+    return sessionAcked.includes(idKey) || sessionAcked.includes(sigKey);
+  };
+
+  const handleAcknowledge = async (alt: any) => {
+    const alertId = typeof alt === 'number' ? alt : alt.id;
+    const alertObj = typeof alt === 'object' ? alt : (liveData?.open_alerts || []).find((a: any) => a.id === alertId);
+
+    // Record in browser session storage so it never pops up again during this dashboard session
+    const idKey = String(alertId);
+    const sigKey = alertObj ? `${selectedDeviceId}:${alertObj.type}:${alertObj.phase || 'ALL'}` : null;
+    const newKeys = [idKey, ...(sigKey ? [sigKey] : [])];
+
+    setSessionAcked((prev) => {
+      const updated = Array.from(new Set([...prev, ...newKeys]));
+      try {
+        sessionStorage.setItem('elicius_session_acked_alerts', JSON.stringify(updated));
+      } catch (e) {
+        console.error('sessionStorage error:', e);
+      }
+      return updated;
+    });
+
+    // Optimistic UI update: immediately remove from visible alerts
     setLiveData((prev: any) => {
       if (!prev || !prev.open_alerts) return prev;
       return {
@@ -348,7 +385,9 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const overallStatus = liveData?.status || selectedDevice?.status || 'Normal';
+  const visibleAlerts = (liveData?.open_alerts || []).filter((alt: any) => !isAlertAckedInSession(alt));
+  const rawStatus = liveData?.status || selectedDevice?.status || 'Normal';
+  const overallStatus = visibleAlerts.length === 0 && rawStatus === 'Warning' ? 'Normal' : rawStatus;
   const statusTheme = getStatusColor(overallStatus);
 
   if (devices.length === 0) {
@@ -432,9 +471,9 @@ export const Dashboard: React.FC = () => {
         </div>
 
         {/* Compact Open Alerts List with Acknowledge Button */}
-        {liveData?.open_alerts && liveData.open_alerts.length > 0 && (
+        {visibleAlerts.length > 0 && (
           <div className="mt-4 pt-4 border-t border-slate-200/60 space-y-2">
-            {liveData.open_alerts.map((alt: any) => (
+            {visibleAlerts.map((alt: any) => (
               <div
                 key={alt.id}
                 className={`flex items-center justify-between p-2.5 bg-white/90 rounded-xl border text-xs ${
@@ -452,7 +491,7 @@ export const Dashboard: React.FC = () => {
                   <span className="text-[11px] text-slate-400">({formatIstTimeOnly(alt.started_at)})</span>
                 </div>
                 <button
-                  onClick={() => handleAcknowledge(alt.id)}
+                  onClick={() => handleAcknowledge(alt)}
                   className={`px-2.5 py-1 text-white font-medium rounded-md text-[11px] transition-colors cursor-pointer ${
                     alt.severity === 'Warning' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'
                   }`}

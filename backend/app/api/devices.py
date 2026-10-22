@@ -416,7 +416,8 @@ def acknowledge_alert(
     now = datetime.now(timezone.utc)
     alert.acknowledged_by = user.username
     alert.acknowledged_at = now
-    alert.cleared_at = now
+    # Note: Do not set cleared_at = now. The fault is acknowledged, not cleared.
+    # fault_engine automatically sets cleared_at when physical readings return to normal.
 
     # If no other unacknowledged alerts remain, reset device status to Normal
     remaining = (

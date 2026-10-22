@@ -328,8 +328,11 @@ class FaultEngine:
                     else:
                         open_alert.severity = severity
                         open_alert.details = alert_details
-                    active_severities.append(severity)
-                    self._update_phase_chips(phase_chips, rule_type, phase, severity, message)
+
+                    # Only trip active alarm severity if not already acknowledged by operator
+                    if open_alert.acknowledged_at is None:
+                        active_severities.append(severity)
+                        self._update_phase_chips(phase_chips, rule_type, phase, severity, message)
             else:
                 state["good_count"] += 1
                 state["bad_count"] = 0
@@ -338,8 +341,9 @@ class FaultEngine:
                     open_alert.cleared_at = reading_time
                 elif open_alert:
                     # Still open while clearing debounce in progress
-                    active_severities.append(severity)
-                    self._update_phase_chips(phase_chips, rule_type, phase, severity, message)
+                    if open_alert.acknowledged_at is None:
+                        active_severities.append(severity)
+                        self._update_phase_chips(phase_chips, rule_type, phase, severity, message)
 
         # ── Compute Overall Status (Precedence order) ─────────────────────
         # Communication failure > Disconnected > Incorrect connection > Warning > Normal
