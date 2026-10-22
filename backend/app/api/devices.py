@@ -413,7 +413,31 @@ def acknowledge_alert(
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
     
+    now = datetime.now(timezone.utc)
     alert.acknowledged_by = user.username
-    alert.acknowledged_at = datetime.now(timezone.utc)
+    alert.acknowledged_at = now
+    alert.cleared_at = now
+
+    # If no other unacknowledged alerts remain, reset device status to Normal
+    remaining = (
+        db.query(Alert)
+        .filter(
+            Alert.device_id == device_id,
+            Alert.cleared_at.is_(None),
+            Alert.acknowledged_at.is_(None)
+        )
+        .count()
+    )
+    if remaining == 0:
+        dev = db.query(Device).filter(Device.device_id == device_id).first()
+        if dev:
+            dev.status = "Normal"
+            if dev.status_detail:
+                chips = dict(dev.status_detail)
+                for k in ["ct_l1", "ct_l2", "ct_l3", "vclip_l1", "vclip_l2", "vclip_l3"]:
+                    chips[k] = "Normal"
+                    chips[f"{k}_detail"] = "Normal"
+                dev.status_detail = chips
+
     db.commit()
-    return {"message": "Alert acknowledged successfully"}
+    return {"message": "Alert acknowledged and dismissed successfully"}

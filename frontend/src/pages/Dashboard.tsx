@@ -219,11 +219,33 @@ export const Dashboard: React.FC = () => {
   };
 
   const handleAcknowledge = async (alertId: number) => {
+    // Optimistic UI update: immediately remove from banner
+    setLiveData((prev: any) => {
+      if (!prev || !prev.open_alerts) return prev;
+      return {
+        ...prev,
+        open_alerts: prev.open_alerts.filter((a: any) => a.id !== alertId)
+      };
+    });
+
     try {
-      await axios.post(`/api/devices/${selectedDeviceId}/alerts/${alertId}/acknowledge`, {}, { withCredentials: true });
-      fetchLive();
+      const csrf = document.cookie
+        .split('; ')
+        .find((part) => part.startsWith('elicius_csrf='))
+        ?.split('=')[1];
+
+      await axios.post(
+        `/api/devices/${selectedDeviceId}/alerts/${alertId}/acknowledge`,
+        {},
+        {
+          withCredentials: true,
+          headers: csrf ? { 'X-CSRF-Token': decodeURIComponent(csrf) } : {}
+        }
+      );
+      await fetchLive();
     } catch (err) {
       console.error('Error acknowledging alert:', err);
+      await fetchLive();
     }
   };
 

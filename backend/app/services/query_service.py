@@ -63,11 +63,16 @@ class QueryService:
         )
         today_kwh = self._integrate_energy([(r.ts, r.t_kw) for r in today_readings], expected_interval_s=device.expected_interval_s or 60)
 
-        # Active open alerts
+        # Active open alerts (exclude cleared and acknowledged)
         open_alerts = (
             db.query(Alert)
-            .filter(Alert.device_id == device_id, Alert.cleared_at.is_(None))
+            .filter(
+                Alert.device_id == device_id,
+                Alert.cleared_at.is_(None),
+                Alert.acknowledged_at.is_(None)
+            )
             .order_by(desc(Alert.started_at))
+            .limit(10)
             .all()
         )
 
