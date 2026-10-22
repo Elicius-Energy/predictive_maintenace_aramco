@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useDevice } from '../contexts/DeviceContext';
 import {
   Activity, Zap, Gauge, Flame, Clock, RefreshCw, AlertTriangle,
-  CheckCircle2, WifiOff, AlertCircle
+  CheckCircle2, WifiOff, AlertCircle, Loader2
 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
@@ -156,6 +156,7 @@ export const Dashboard: React.FC = () => {
   // 2. Compute date window from presets
   const handlePresetChange = (preset: '1h' | '8h' | '24h' | '7d') => {
     setAnalysisPreset(preset);
+    setTrendsLoading(true);
     const now = new Date();
     const hours = preset === '1h' ? 1 : preset === '8h' ? 8 : preset === '24h' ? 24 : 168;
     const start = new Date(now.getTime() - hours * 3600 * 1000);
@@ -177,7 +178,7 @@ export const Dashboard: React.FC = () => {
   // 3. Fetch Trend Charts & Summary without screen blinking
   const fetchTrendsAndSummary = async (isBackground = false) => {
     if (!selectedDeviceId) return;
-    if (!isBackground && trends.length === 0) {
+    if (!isBackground) {
       setTrendsLoading(true);
     }
     setChartHint(null);
@@ -713,7 +714,13 @@ export const Dashboard: React.FC = () => {
 
           {/* Chart 1: Current Trend (3 Phases) */}
           {activeParams.current && (
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <div className="relative overflow-hidden bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              {trendsLoading && (
+                <div className="absolute inset-0 bg-white/75 backdrop-blur-[1.5px] z-10 flex flex-col items-center justify-center gap-2 transition-all">
+                  <Loader2 className="w-6 h-6 text-[#1F3A8A] animate-spin" />
+                  <span className="text-xs font-semibold text-slate-600">Updating plot...</span>
+                </div>
+              )}
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Current Trend (3 Phases)</span>
                 <div className="flex items-center gap-3 text-xs font-semibold">
@@ -743,7 +750,13 @@ export const Dashboard: React.FC = () => {
 
           {/* Chart 2: Active Power (kW) Trend */}
           {activeParams.kw && (
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <div className="relative overflow-hidden bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              {trendsLoading && (
+                <div className="absolute inset-0 bg-white/75 backdrop-blur-[1.5px] z-10 flex flex-col items-center justify-center gap-2 transition-all">
+                  <Loader2 className="w-6 h-6 text-[#1F3A8A] animate-spin" />
+                  <span className="text-xs font-semibold text-slate-600">Updating plot...</span>
+                </div>
+              )}
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Active Power (kW)</span>
                 <span className="text-xs font-semibold text-slate-500">Avg: {summary?.avg_kw ?? 0} kW</span>
@@ -770,7 +783,13 @@ export const Dashboard: React.FC = () => {
 
           {/* Chart 3: Interval Energy (kWh) Trend */}
           {activeParams.kwh && (
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <div className="relative overflow-hidden bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              {trendsLoading && (
+                <div className="absolute inset-0 bg-white/75 backdrop-blur-[1.5px] z-10 flex flex-col items-center justify-center gap-2 transition-all">
+                  <Loader2 className="w-6 h-6 text-[#1F3A8A] animate-spin" />
+                  <span className="text-xs font-semibold text-slate-600">Updating plot...</span>
+                </div>
+              )}
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Interval Energy (kWh)</span>
                 <span className="text-xs font-semibold text-[#1F3A8A]">Total: {summary?.energy_kwh ?? 0} kWh</span>
@@ -794,7 +813,13 @@ export const Dashboard: React.FC = () => {
 
           {/* Chart 4: Line-to-Line Voltage Trend */}
           {activeParams.voltage && (
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <div className="relative overflow-hidden bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              {trendsLoading && (
+                <div className="absolute inset-0 bg-white/75 backdrop-blur-[1.5px] z-10 flex flex-col items-center justify-center gap-2 transition-all">
+                  <Loader2 className="w-6 h-6 text-[#1F3A8A] animate-spin" />
+                  <span className="text-xs font-semibold text-slate-600">Updating plot...</span>
+                </div>
+              )}
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Line-to-Line Voltage Trend</span>
                 <div className="flex items-center gap-3 text-xs font-semibold">
@@ -824,7 +849,13 @@ export const Dashboard: React.FC = () => {
 
           {/* Chart 5: Power Factor Trend */}
           {activeParams.pf && (
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <div className="relative overflow-hidden bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              {trendsLoading && (
+                <div className="absolute inset-0 bg-white/75 backdrop-blur-[1.5px] z-10 flex flex-col items-center justify-center gap-2 transition-all">
+                  <Loader2 className="w-6 h-6 text-[#1F3A8A] animate-spin" />
+                  <span className="text-xs font-semibold text-slate-600">Updating plot...</span>
+                </div>
+              )}
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Power Factor Trend</span>
                 <span className="text-xs font-semibold text-emerald-600">Weighted: {summary?.weighted_pf ?? 1.0}</span>
@@ -848,7 +879,13 @@ export const Dashboard: React.FC = () => {
 
           {/* Chart 6: Frequency Trend */}
           {activeParams.freq && (
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+            <div className="relative overflow-hidden bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              {trendsLoading && (
+                <div className="absolute inset-0 bg-white/75 backdrop-blur-[1.5px] z-10 flex flex-col items-center justify-center gap-2 transition-all">
+                  <Loader2 className="w-6 h-6 text-[#1F3A8A] animate-spin" />
+                  <span className="text-xs font-semibold text-slate-600">Updating plot...</span>
+                </div>
+              )}
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-700">Frequency (Hz)</span>
                 <span className="text-xs font-semibold text-slate-500">Nominal: 50.0 Hz</span>
@@ -863,7 +900,7 @@ export const Dashboard: React.FC = () => {
                       labelFormatter={(lbl) => formatIstDateTime(lbl)}
                       formatter={(val: any) => [`${val} Hz`, 'Frequency']}
                     />
-                    <Line isAnimationActive={false} type="monotone" dataKey="freq" name="Frequency" stroke="#8B5CF6" strokeWidth={1.5} dot={false} connectNulls={false} />
+                    <Line isAnimationActive={false} type="monotone" dataKey="freq" name="Frequency" stroke="#8B5CF6" strokeWidth={1.5} dot={false} connectNulls={true} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
