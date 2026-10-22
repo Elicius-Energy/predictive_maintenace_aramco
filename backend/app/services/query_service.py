@@ -233,30 +233,62 @@ class QueryService:
                 else:
                     v_avg = None
 
+                # Per-phase current fallback for historical data where only i_avg was logged
+                i_avg_val = self._safe_round(self._avg([v.get("i_avg") for v in vals]), 2)
+                i1_val = self._safe_round(self._avg([v.get("i1") for v in vals]), 2)
+                i2_val = self._safe_round(self._avg([v.get("i2") for v in vals]), 2)
+                i3_val = self._safe_round(self._avg([v.get("i3") for v in vals]), 2)
+                if i1_val is None and i_avg_val is not None:
+                    i1_val, i2_val, i3_val = i_avg_val, i_avg_val, i_avg_val
+
+                # Per-phase voltage fallback for historical data where only vll_avg / v_avg was logged
+                vll_val = self._safe_round(vll_avg, 1)
+                v12_val = self._safe_round(self._avg([v.get("v12") for v in vals]), 1)
+                v23_val = self._safe_round(self._avg([v.get("v23") for v in vals]), 1)
+                v31_val = self._safe_round(self._avg([v.get("v31") for v in vals]), 1)
+                if v12_val is None and v_avg is not None:
+                    v12_val, v23_val, v31_val = v_avg, v_avg, v_avg
+
+                # Per-phase power fallback for historical data
+                kw1_val = self._safe_round(self._avg([v.get("kw1") for v in vals]), 2)
+                kw2_val = self._safe_round(self._avg([v.get("kw2") for v in vals]), 2)
+                kw3_val = self._safe_round(self._avg([v.get("kw3") for v in vals]), 2)
+                if kw1_val is None and avg_kw is not None:
+                    kw_third = round(avg_kw / 3.0, 2)
+                    kw1_val, kw2_val, kw3_val = kw_third, kw_third, kw_third
+
+                # Per-phase PF fallback for historical data
+                pf_avg_val = self._safe_round(self._avg([v.get("pf_avg") for v in vals]), 2)
+                pf1_val = self._safe_round(self._avg([v.get("pf1") for v in vals]), 2)
+                pf2_val = self._safe_round(self._avg([v.get("pf2") for v in vals]), 2)
+                pf3_val = self._safe_round(self._avg([v.get("pf3") for v in vals]), 2)
+                if pf1_val is None and pf_avg_val is not None:
+                    pf1_val, pf2_val, pf3_val = pf_avg_val, pf_avg_val, pf_avg_val
+
                 points.append({
                     "ts": dt_str,
                     "kwh": round(b_kwh, 3),
                     "cum_kwh": round(prev_cum_kwh, 3),
                     "kw": round(avg_kw, 2),
-                    "kw1": self._safe_round(self._avg([v.get("kw1") for v in vals]), 2),
-                    "kw2": self._safe_round(self._avg([v.get("kw2") for v in vals]), 2),
-                    "kw3": self._safe_round(self._avg([v.get("kw3") for v in vals]), 2),
+                    "kw1": kw1_val,
+                    "kw2": kw2_val,
+                    "kw3": kw3_val,
                     "v_avg": v_avg,
-                    "vll_avg": self._safe_round(vll_avg, 1),
-                    "v12": self._safe_round(self._avg([v.get("v12") for v in vals]), 1),
-                    "v23": self._safe_round(self._avg([v.get("v23") for v in vals]), 1),
-                    "v31": self._safe_round(self._avg([v.get("v31") for v in vals]), 1),
+                    "vll_avg": vll_val,
+                    "v12": v12_val,
+                    "v23": v23_val,
+                    "v31": v31_val,
                     "v1n": self._safe_round(self._avg([v.get("v1n") for v in vals]), 1),
                     "v2n": self._safe_round(self._avg([v.get("v2n") for v in vals]), 1),
                     "v3n": self._safe_round(self._avg([v.get("v3n") for v in vals]), 1),
-                    "i_avg": self._safe_round(self._avg([v.get("i_avg") for v in vals]), 2),
-                    "i1": self._safe_round(self._avg([v.get("i1") for v in vals]), 2),
-                    "i2": self._safe_round(self._avg([v.get("i2") for v in vals]), 2),
-                    "i3": self._safe_round(self._avg([v.get("i3") for v in vals]), 2),
-                    "pf_avg": self._safe_round(self._avg([v.get("pf_avg") for v in vals]), 2),
-                    "pf1": self._safe_round(self._avg([v.get("pf1") for v in vals]), 2),
-                    "pf2": self._safe_round(self._avg([v.get("pf2") for v in vals]), 2),
-                    "pf3": self._safe_round(self._avg([v.get("pf3") for v in vals]), 2),
+                    "i_avg": i_avg_val,
+                    "i1": i1_val,
+                    "i2": i2_val,
+                    "i3": i3_val,
+                    "pf_avg": pf_avg_val,
+                    "pf1": pf1_val,
+                    "pf2": pf2_val,
+                    "pf3": pf3_val,
                     "freq": self._safe_round(self._avg([v.get("freq") for v in vals]), 2)
                 })
 

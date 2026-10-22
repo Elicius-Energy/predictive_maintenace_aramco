@@ -41,11 +41,30 @@ export const Dashboard: React.FC = () => {
     return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
   };
 
-  // IST Time Formatter (HH:mm in Asia/Kolkata)
+  // Adaptive IST Time / Date Formatter for X-Axis
   const formatTimeTick = (iso: string) => {
     if (!iso) return '';
     try {
       const d = new Date(iso);
+      if (analysisPreset === '7d') {
+        return d.toLocaleDateString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          day: 'numeric',
+          month: 'short',
+        });
+      }
+      if (analysisPreset === '24h') {
+        return d.toLocaleDateString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          day: 'numeric',
+          month: 'short',
+        }) + ' ' + d.toLocaleTimeString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        });
+      }
       return d.toLocaleTimeString('en-IN', {
         timeZone: 'Asia/Kolkata',
         hour: '2-digit',
@@ -713,9 +732,9 @@ export const Dashboard: React.FC = () => {
                       labelFormatter={(lbl) => formatIstDateTime(lbl)}
                       formatter={(val: any, name: any) => [`${val} A`, name]}
                     />
-                    <Line isAnimationActive={false} type="monotone" dataKey="i1" name="I L1" stroke="#EF4444" strokeWidth={1.5} dot={false} connectNulls={false} />
-                    <Line isAnimationActive={false} type="monotone" dataKey="i2" name="I L2" stroke="#F59E0B" strokeWidth={1.5} dot={false} connectNulls={false} />
-                    <Line isAnimationActive={false} type="monotone" dataKey="i3" name="I L3" stroke="#3B82F6" strokeWidth={1.5} dot={false} connectNulls={false} />
+                    <Line isAnimationActive={false} type="monotone" dataKey="i1" name="I L1" stroke="#EF4444" strokeWidth={1.5} dot={false} connectNulls={true} />
+                    <Line isAnimationActive={false} type="monotone" dataKey="i2" name="I L2" stroke="#F59E0B" strokeWidth={1.5} dot={false} connectNulls={true} />
+                    <Line isAnimationActive={false} type="monotone" dataKey="i3" name="I L3" stroke="#3B82F6" strokeWidth={1.5} dot={false} connectNulls={true} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -742,7 +761,7 @@ export const Dashboard: React.FC = () => {
                     {alertWindows.map((aw: any, i: number) => (
                       <ReferenceArea key={i} x1={aw.start} x2={aw.end} fill="#FEE2E2" fillOpacity={0.4} />
                     ))}
-                    <Line isAnimationActive={false} type="monotone" dataKey="kw" stroke="#1F3A8A" strokeWidth={2} dot={false} connectNulls={false} />
+                    <Line isAnimationActive={false} type="monotone" dataKey="kw" stroke="#1F3A8A" strokeWidth={2} dot={false} connectNulls={true} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -794,9 +813,9 @@ export const Dashboard: React.FC = () => {
                       labelFormatter={(lbl) => formatIstDateTime(lbl)}
                       formatter={(val: any, name: any) => [`${val} V`, name]}
                     />
-                    <Line isAnimationActive={false} type="monotone" dataKey="v12" name="V12 (L1-L2)" stroke="#EF4444" strokeWidth={1.5} dot={false} connectNulls={false} />
-                    <Line isAnimationActive={false} type="monotone" dataKey="v23" name="V23 (L2-L3)" stroke="#F59E0B" strokeWidth={1.5} dot={false} connectNulls={false} />
-                    <Line isAnimationActive={false} type="monotone" dataKey="v31" name="V31 (L3-L1)" stroke="#3B82F6" strokeWidth={1.5} dot={false} connectNulls={false} />
+                    <Line isAnimationActive={false} type="monotone" dataKey="v12" name="V12 (L1-L2)" stroke="#EF4444" strokeWidth={1.5} dot={false} connectNulls={true} />
+                    <Line isAnimationActive={false} type="monotone" dataKey="v23" name="V23 (L2-L3)" stroke="#F59E0B" strokeWidth={1.5} dot={false} connectNulls={true} />
+                    <Line isAnimationActive={false} type="monotone" dataKey="v31" name="V31 (L3-L1)" stroke="#3B82F6" strokeWidth={1.5} dot={false} connectNulls={true} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -820,7 +839,7 @@ export const Dashboard: React.FC = () => {
                       labelFormatter={(lbl) => formatIstDateTime(lbl)}
                       formatter={(val: any) => [val, 'Power Factor']}
                     />
-                    <Line isAnimationActive={false} type="monotone" dataKey="pf_avg" name="Power Factor" stroke="#10B981" strokeWidth={2} dot={false} connectNulls={false} />
+                    <Line isAnimationActive={false} type="monotone" dataKey="pf_avg" name="Power Factor" stroke="#10B981" strokeWidth={2} dot={false} connectNulls={true} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
