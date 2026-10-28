@@ -94,3 +94,4 @@ def test_web_search_helper():
     sources = search_web_for_motor_roi("22 kW IE4 motor price India", 22.0)
     assert len(sources) >= 1
     assert "22.0 kW" in sources[0]["title"] or "22 kW" in sources[0]["title"] or "Price" in sources[0]["title"]
+

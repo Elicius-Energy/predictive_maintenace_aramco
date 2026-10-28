@@ -99,3 +99,4 @@ def search_web_for_motor_roi(query: str, motor_kw: float = 22.0) -> List[Dict[st
         logger.debug("DuckDuckGo search fallback skipped: %s", exc)
 
     return results
+

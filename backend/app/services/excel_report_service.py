@@ -858,37 +858,6 @@ class ExcelReportService:
         ws.set_row(24, 30)
         ws.set_row(25, 30)
         ws.freeze_panes(4, 1)
-        for row, (label, value, unit) in enumerate(values, start=11):
-            ws.write(row, 1, label, f_summary_label)
-            if isinstance(value, (int, float)):
-                ws.write_number(row, 2, value, f_summary_value)
-            else:
-                ws.write(row, 2, value if value is not None else "Not calculable", f_summary_text)
-            ws.write(row, 3, unit, f_summary_text)
-            ws.set_row(row, 30)
-
-        ws.merge_range("B19:D19", "REPLACEMENT SCENARIO AND BASIS", f_summary_section)
-        if scenario:
-            details = (
-                f"{scenario.get('label', 'Replacement motor')}\n"
-                f"{scenario.get('status', '')}\n"
-                f"Annual loaded hours used: {scenario.get('annual_loaded_hours') if scenario.get('annual_loaded_hours') is not None else 'not configured'}"
-            )
-        else:
-            details = "Replacement savings could not be calculated. Configure the existing and replacement motor efficiencies, motor rating, annual operating hours, and electricity tariff."
-        ws.merge_range("B20:D22", details, f_summary_text)
-        ws.merge_range(
-            "B24:D26",
-            "Savings are estimates based on measured average load, configured motor efficiencies, observed running fraction, annual operating hours, and electricity tariff. Confirm replacement motor sizing and efficiency at the actual operating point before using these values for investment decisions.",
-            f_summary_text,
-        )
-        ws.set_row(19, 30)
-        ws.set_row(20, 30)
-        ws.set_row(21, 30)
-        ws.set_row(23, 30)
-        ws.set_row(24, 30)
-        ws.set_row(25, 30)
-        ws.freeze_panes(4, 1)
 
     def _write_sheet3_analysis(
         self, ws, summary, points, alerts, auto_obs, profile,

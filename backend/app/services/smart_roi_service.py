@@ -420,3 +420,4 @@ Enterprises can leverage BEE energy efficiency incentives and state MSME capital
             "calculated_roi": roi_metrics,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+
