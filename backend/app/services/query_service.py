@@ -491,7 +491,26 @@ class QueryService:
 
         idle_hours = idle_seconds / 3600.0
         running_hours = running_seconds / 3600.0
-        idle_pct = (idle_seconds / max(duration_s, 1)) * 100.0
+        monitored_seconds = running_seconds + idle_seconds
+        monitored_hours = monitored_seconds / 3600.0
+        offline_seconds = max(0.0, duration_s - monitored_seconds)
+        offline_hours = offline_seconds / 3600.0
+
+        has_significant_gap = offline_seconds > 900  # More than 15 mins gap
+
+        if monitored_seconds > 0:
+            run_monitored_pct = (running_seconds / monitored_seconds) * 100.0
+            idle_monitored_pct = (idle_seconds / monitored_seconds) * 100.0
+        else:
+            run_monitored_pct = 0.0
+            idle_monitored_pct = 0.0
+
+        run_total_pct = (running_seconds / max(duration_s, 1)) * 100.0
+        idle_total_pct = (idle_seconds / max(duration_s, 1)) * 100.0
+        offline_total_pct = (offline_seconds / max(duration_s, 1)) * 100.0
+
+        time_completeness_pct = min(100.0, round((monitored_seconds / max(duration_s, 1)) * 100.0, 1))
+        final_completeness = time_completeness_pct if has_significant_gap else data_completeness
 
         # Discrepancy against hardware counter delta
         counter_delta = 0
@@ -506,15 +525,20 @@ class QueryService:
             "end_time": end_time.isoformat(),
             "duration_str": self._format_duration(duration_s),
             "duration_hours": round(duration_hours, 2),
+            "monitored_hours": round(monitored_hours, 2),
+            "monitored_time_str": self._format_duration(monitored_seconds),
             "energy_kwh": round(total_energy_kwh, 2),
             "counter_kwh_delta": counter_delta,
             "discrepancy_pct": discrepancy_pct,
-            "idle_time_str": f"{self._format_duration(idle_seconds)} ({idle_pct:.1f}%)",
-            "running_time_str": f"{self._format_duration(running_seconds)} ({max(0.0, 100.0 - idle_pct):.1f}%)",
+            "idle_time_str": f"{self._format_duration(idle_seconds)} ({idle_monitored_pct:.1f}%)" if has_significant_gap else f"{self._format_duration(idle_seconds)} ({idle_total_pct:.1f}%)",
+            "running_time_str": f"{self._format_duration(running_seconds)} ({run_monitored_pct:.1f}%)" if has_significant_gap else f"{self._format_duration(running_seconds)} ({run_total_pct:.1f}%)",
+            "offline_time_str": f"{self._format_duration(offline_seconds)} ({offline_total_pct:.1f}%)" if has_significant_gap else None,
             "idle_hours": round(idle_hours, 2),
             "running_hours": round(running_hours, 2),
-            "idle_pct": round(idle_pct, 1),
-            "running_pct": round(max(0.0, 100.0 - idle_pct), 1),
+            "offline_hours": round(offline_hours, 2) if has_significant_gap else 0.0,
+            "idle_pct": round(idle_monitored_pct if has_significant_gap else idle_total_pct, 1),
+            "running_pct": round(run_monitored_pct if has_significant_gap else run_total_pct, 1),
+            "offline_pct": round(offline_total_pct, 1) if has_significant_gap else 0.0,
             "avg_kw": round(avg_kw, 2),
             "max_kw": round(max_kw, 2) if kw_list else None,
             "min_kw": round(min_kw, 2) if kw_list else None,
@@ -527,7 +551,7 @@ class QueryService:
             "avg_current": round(sum(i_list) / len(i_list), 2) if i_list else None,
             "avg_frequency": round(sum(freq_list) / len(freq_list), 2) if freq_list else None,
             "current_unbalance_pct": i_unbalance_pct,
-            "data_completeness_pct": data_completeness,
+            "data_completeness_pct": final_completeness,
             "samples_count": received_samples
         }
 

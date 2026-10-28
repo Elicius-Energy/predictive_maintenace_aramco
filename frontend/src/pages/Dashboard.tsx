@@ -727,12 +727,16 @@ export const Dashboard: React.FC = () => {
           const durationHrs = summary.duration_hours || 0.001;
           const idleHrs = summary.idle_hours ?? 0;
           const runningHrs = summary.running_hours ?? Math.max(0, durationHrs - idleHrs);
+          const offlineHrs = summary.offline_hours ?? Math.max(0, durationHrs - (runningHrs + idleHrs));
+          const hasGap = offlineHrs > 0.25;
+
           const runningPct = summary.running_pct ?? (durationHrs > 0 ? Math.max(0, Math.min(100, Math.round(((durationHrs - idleHrs) / durationHrs) * 1000) / 10)) : 100);
           const idlePct = summary.idle_pct ?? Math.max(0, Math.round((100 - runningPct) * 10) / 10);
 
           const dutyData = [
             { name: 'Run Time', value: Number(runningHrs.toFixed(2)) || (idleHrs === 0 ? 1 : 0), color: '#10B981' },
             { name: 'Idle Time', value: Number(idleHrs.toFixed(2)), color: '#F59E0B' },
+            ...(hasGap ? [{ name: 'Offline / Gap', value: Number(offlineHrs.toFixed(2)), color: '#94A3B8' }] : []),
           ];
 
           return (
@@ -787,6 +791,17 @@ export const Dashboard: React.FC = () => {
                       {summary.idle_time_str ? summary.idle_time_str : `${idleHrs}h (${idlePct}%)`}
                     </span>
                   </div>
+                  {hasGap && (
+                    <div className="flex items-center justify-between text-slate-500">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-slate-400 shrink-0" />
+                        <span className="font-medium text-[11px]">Offline / Gap:</span>
+                      </div>
+                      <span className="font-bold text-slate-600 text-[11px]">
+                        {summary.offline_time_str || `${offlineHrs.toFixed(1)}h`}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -808,6 +823,12 @@ export const Dashboard: React.FC = () => {
                   <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Analysis Period</span>
                   <span className="font-extrabold text-slate-800">{summary.duration_str}</span>
                 </div>
+                {hasGap && (
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-slate-500 font-medium">Recorded Telemetry:</span>
+                    <span className="font-bold text-slate-700">{summary.monitored_time_str || `${(runningHrs + idleHrs).toFixed(1)} h`}</span>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Energy Consumed</span>
                   <span className="font-extrabold text-[#1F3A8A] text-sm">{summary.energy_kwh} kWh</span>

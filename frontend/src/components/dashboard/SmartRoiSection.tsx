@@ -13,7 +13,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   ExternalLink,
-  ShieldCheck,
   Leaf
 } from 'lucide-react';
 
@@ -189,89 +188,50 @@ export const SmartRoiSection: React.FC<SmartRoiSectionProps> = ({ deviceId }) =>
   const isUnderloaded = (telemetry_metrics?.loading_pct || 100) < 45.0;
 
   return (
-    <div className="mt-8 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+    <div className="mt-8 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden p-6 space-y-6">
       
       {/* ── SECTION HEADER ────────────────────────────────────────────────── */}
-      <div className="p-6 bg-gradient-to-r from-[#0F172A] via-[#1E293B] to-[#1F3A8A] text-white">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-blue-500/30 text-blue-200 border border-blue-400/30">
-                Automated Telemetry Intelligence
-              </span>
-              <span className="text-xs text-slate-300 font-medium">
-                {device?.motor_make} • {device?.motor_rating_kw} kW Motor
-              </span>
-            </div>
-            <h2 className="text-xl font-extrabold tracking-tight mt-1 text-white flex items-center gap-2">
-              <Calculator className="w-5 h-5 text-blue-300" />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+        <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <Calculator className="w-5 h-5 text-[#1F3A8A]" />
               Smart Motor ROI & Energy Optimization
             </h2>
-            <p className="text-xs text-slate-300 mt-1 max-w-2xl">
-              Calculates financial payback by automatically integrating measured telemetry (load factor, operating duty, power factor) and asking only for plant-subjective procurement costs.
-            </p>
+            {device?.motor_rating_kw && (
+              <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                {device?.motor_make ? `${device.motor_make} • ` : ''}{device.motor_rating_kw} kW Motor
+              </span>
+            )}
           </div>
-
-          {/* Quick Refresh */}
-          <button
-            onClick={fetchSmartRoiContext}
-            title="Refresh Telemetry Context"
-            className="self-start md:self-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-semibold text-white transition-colors cursor-pointer"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Reload Telemetry</span>
-          </button>
+          <p className="text-xs text-slate-500 mt-1">
+            Calculates financial payback by automatically integrating measured telemetry and asking only for plant-subjective procurement costs.
+          </p>
         </div>
 
-        {/* ── AUTOMATIC TELEMETRY BADGES (What the system already extracted) ─ */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2.5 mt-5 pt-4 border-t border-white/10 text-xs">
-          <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
-            <span className="text-[11px] text-slate-400 block font-medium">Measured Power</span>
-            <span className="text-sm font-bold text-white">{telemetry_metrics?.avg_kw} kW</span>
-            <span className="text-[10px] text-slate-400 block">Peak: {telemetry_metrics?.max_kw} kW</span>
-          </div>
-          <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
-            <span className="text-[11px] text-slate-400 block font-medium">Motor Loading</span>
-            <span className={`text-sm font-bold ${isUnderloaded ? 'text-amber-300' : 'text-emerald-300'}`}>
-              {telemetry_metrics?.loading_pct}%
-            </span>
-            <span className="text-[10px] text-slate-400 block">{telemetry_metrics?.loading_status === 'severely_underloaded' ? 'Underloaded' : 'Normal'}</span>
-          </div>
-          <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
-            <span className="text-[11px] text-slate-400 block font-medium">Duty Cycle</span>
-            <span className="text-sm font-bold text-white">{telemetry_metrics?.duty_pct}% Run</span>
-            <span className="text-[10px] text-slate-400 block">~{telemetry_metrics?.projected_annual_loaded_hours?.toLocaleString()} hrs/yr</span>
-          </div>
-          <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
-            <span className="text-[11px] text-slate-400 block font-medium">Power Factor</span>
-            <span className="text-sm font-bold text-emerald-300">{telemetry_metrics?.weighted_pf}</span>
-            <span className="text-[10px] text-slate-400 block">Weighted PF</span>
-          </div>
-          <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
-            <span className="text-[11px] text-slate-400 block font-medium">Current Efficiency</span>
-            <span className="text-sm font-bold text-white">{device?.rated_efficiency_pct}%</span>
-            <span className="text-[10px] text-slate-400 block">IE2 Baseline</span>
-          </div>
-          <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
-            <span className="text-[11px] text-slate-400 block font-medium">Application</span>
-            <span className="text-sm font-bold text-white truncate block">{device?.machine_name || 'Air Compressor'}</span>
-            <span className="text-[10px] text-slate-400 block truncate">{device?.location || 'Plant Floor'}</span>
-          </div>
-        </div>
-
-        {/* Highlight Banner if Severely Underloaded */}
-        {isUnderloaded && (
-          <div className="mt-3 p-3 bg-amber-500/20 border border-amber-400/40 rounded-xl flex items-start gap-2 text-xs text-amber-200">
-            <AlertTriangle className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
-            <div>
-              <span className="font-bold text-amber-100">Right-Sizing Opportunity Detected: </span>
-              {telemetry_metrics?.loading_note}
-            </div>
-          </div>
-        )}
+        {/* Reload Telemetry Button */}
+        <button
+          onClick={fetchSmartRoiContext}
+          title="Reload Telemetry Context"
+          className="self-start sm:self-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 transition-colors cursor-pointer shadow-2xs"
+        >
+          <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
+          <span>Reload Telemetry</span>
+        </button>
       </div>
 
-      <div className="p-6 space-y-6">
+      {/* Highlight Banner if Severely Underloaded */}
+      {isUnderloaded && (
+        <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-xl flex items-start gap-2.5 text-xs text-amber-900">
+          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-bold text-amber-950">Right-Sizing Opportunity Detected: </span>
+            {telemetry_metrics?.loading_note}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-6">
         
         {/* ── STEP 1: ONE-CLICK UPGRADE PRESETS ──────────────────────────── */}
         <div>
@@ -421,7 +381,7 @@ export const SmartRoiSection: React.FC<SmartRoiSectionProps> = ({ deviceId }) =>
             3. Instant Financial & Energy Return Summary
           </label>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             
             {/* 1. Annual Savings */}
             <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
@@ -473,19 +433,7 @@ export const SmartRoiSection: React.FC<SmartRoiSectionProps> = ({ deviceId }) =>
               <span className="text-[10px] text-slate-500 font-medium">kWh / year</span>
             </div>
 
-            {/* 5. 5-Year Net Benefit */}
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
-              <div className="flex items-center gap-1.5 text-slate-700 text-xs font-semibold mb-1">
-                <ShieldCheck className="w-4 h-4 text-indigo-500" />
-                <span>5-Year Net Gain</span>
-              </div>
-              <div className={`text-xl font-extrabold ${calculatedRoi?.five_year_net_savings >= 0 ? 'text-indigo-700' : 'text-red-600'}`}>
-                ₹{calculatedRoi?.five_year_net_savings?.toLocaleString() || '0'}
-              </div>
-              <span className="text-[10px] text-slate-500 font-medium">Net profit after Capex</span>
-            </div>
-
-            {/* 6. Carbon Emissions Avoided */}
+            {/* 5. Carbon Emissions Avoided */}
             <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
               <div className="flex items-center gap-1.5 text-slate-700 text-xs font-semibold mb-1">
                 <Leaf className="w-4 h-4 text-emerald-500" />
