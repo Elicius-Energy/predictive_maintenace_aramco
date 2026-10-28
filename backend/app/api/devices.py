@@ -442,3 +442,77 @@ def acknowledge_alert(
 
     db.commit()
     return {"message": "Alert acknowledged and dismissed successfully"}
+
+
+# ── Smart ROI & Market Intelligence Endpoints ─────────────────────────────────
+
+class SmartRoiCalculateRequest(BaseModel):
+    avg_kw: float
+    current_eff: float
+    candidate_eff: float
+    candidate_kw: float
+    rated_kw: float
+    annual_hours: float
+    tariff: float
+    motor_investment: float
+    installation_cost: float
+
+
+class SmartRoiAiConsultRequest(BaseModel):
+    query: Optional[str] = None
+    inputs: Dict[str, Any] = {}
+    include_web_search: bool = True
+
+
+@router.get("/{device_id}/smart-roi")
+def get_smart_roi(device_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Fetch smart ROI context, presets, telemetry facts, and initial calculations."""
+    require_device_access(user, device_id, db)
+    try:
+        from app.services.smart_roi_service import get_smart_roi_context
+        return get_smart_roi_context(device_id, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to calculate smart ROI: {exc}")
+
+
+@router.post("/{device_id}/smart-roi-calculate")
+def recalculate_smart_roi(
+    device_id: str,
+    req: SmartRoiCalculateRequest,
+    user: User = Depends(get_current_user)
+):
+    """Instantly recalculate ROI metrics based on edited subjective inputs."""
+    from app.services.smart_roi_service import calculate_roi_metrics
+    return calculate_roi_metrics(
+        avg_kw=req.avg_kw,
+        current_eff=req.current_eff,
+        candidate_eff=req.candidate_eff,
+        candidate_kw=req.candidate_kw,
+        rated_kw=req.rated_kw,
+        annual_hours=req.annual_hours,
+        tariff=req.tariff,
+        motor_investment=req.motor_investment,
+        installation_cost=req.installation_cost
+    )
+
+
+@router.post("/{device_id}/smart-roi-ai")
+async def consult_smart_roi_ai(
+    device_id: str,
+    req: SmartRoiAiConsultRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """Run AI executive analysis with web search capability for motor market pricing and payback."""
+    require_device_access(user, device_id, db)
+    from app.services.smart_roi_service import generate_smart_roi_ai_analysis
+    return await generate_smart_roi_ai_analysis(
+        device_id=device_id,
+        query=req.query,
+        inputs=req.inputs,
+        include_web_search=req.include_web_search,
+        db=db
+    )
+

@@ -10,6 +10,7 @@ import {
   XAxis, YAxis, Tooltip, CartesianGrid, ReferenceArea,
   PieChart, Pie, Cell
 } from 'recharts';
+import { SmartRoiSection } from '../components/dashboard/SmartRoiSection';
 
 export const Dashboard: React.FC = () => {
   const { devices, selectedDevice, selectedDeviceId, getStatusColor } = useDevice();
@@ -1062,6 +1063,11 @@ export const Dashboard: React.FC = () => {
           )}
 
         </div>
+      )}
+
+      {/* ── SMART ROI CALCULATION & AI MARKET INTELLIGENCE TAB ──────────── */}
+      {selectedDeviceId && (
+        <SmartRoiSection deviceId={selectedDeviceId} />
       )}
 
     </div>
