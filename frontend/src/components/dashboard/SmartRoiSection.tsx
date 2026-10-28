@@ -45,6 +45,7 @@ export const SmartRoiSection: React.FC<SmartRoiSectionProps> = ({ deviceId }) =>
   const [aiLoading, setAiLoading] = useState<boolean>(false);
   const [aiReport, setAiReport] = useState<string | null>(null);
   const [aiSources, setAiSources] = useState<any[]>([]);
+  const [aiModelUsed, setAiModelUsed] = useState<string>('gpt-5.6-luna');
 
   // Fetch initial smart ROI context on device change
   const fetchSmartRoiContext = async () => {
@@ -144,6 +145,9 @@ export const SmartRoiSection: React.FC<SmartRoiSectionProps> = ({ deviceId }) =>
       });
       setAiReport(res.data.analysis);
       setAiSources(res.data.sources || []);
+      if (res.data.model_used) {
+        setAiModelUsed(res.data.model_used);
+      }
       if (res.data.calculated_roi) {
         setCalculatedRoi(res.data.calculated_roi);
       }
@@ -608,7 +612,7 @@ export const SmartRoiSection: React.FC<SmartRoiSectionProps> = ({ deviceId }) =>
                   <span>AI Executive Consultation & Engineering Appraisal</span>
                 </span>
                 <span className="text-[11px] font-semibold text-slate-400">
-                  Model: gpt-4o-mini with Live Web Grounding
+                  Model: {aiModelUsed} with Live Web Grounding
                 </span>
               </div>
               <div className="prose prose-sm max-w-none prose-slate text-xs leading-relaxed space-y-2">

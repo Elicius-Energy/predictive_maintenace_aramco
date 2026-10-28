@@ -328,31 +328,45 @@ class RAGService:
         knowledge_text = self.retrieve_documents(
             "motor efficiency loading duty cycle power study replacement motor savings", device_id, db, top_k=4
         )[:6500]
-        response = await client.chat.completions.create(
-            model=get_runtime_settings().OPENAI_CHAT_MODEL,
-            temperature=0.2,
-            max_tokens=1200,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a senior industrial motor power study and energy audit engineer with 20+ years of plant experience. "
-                        "Always synthesize the measured facts, duty observations, and provided replacement scenarios into concrete, "
-                        "actionable financial and energy insights. Always provide the best calculated annual energy savings (kWh), "
-                        "annual monetary savings (Rs/year), and estimated payback period based on the supplied data. "
-                        "Never say 'not calculable' or 'cannot be calculated'. If any commercial assumptions were used "
-                        "(such as IE3/IE4 upgrade efficiency, observed duty-cycle projected hours, or standard industrial tariffs), "
-                        "clearly state the assumptions alongside the concrete numbers so plant managers have immediate, decision-ready data. "
-                        "Include 2-3 specific technical recommendations (such as right-sizing opportunities if underloaded, VFD suitability, or power factor correction). "
-                        "Format cleanly with bullet points and plain text."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"COMPACT STUDY DATA:\n{compact_report_context}\n\nRETRIEVED TECHNICAL CONTEXT:\n{knowledge_text or 'No relevant reference material retrieved.'}",
-                },
-            ],
-        )
+        model_name = get_runtime_settings().OPENAI_CHAT_MODEL or "gpt-5.6-luna"
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a senior industrial motor power study and energy audit engineer with 20+ years of plant experience. "
+                    "Always synthesize the measured facts, duty observations, and provided replacement scenarios into concrete, "
+                    "actionable financial and energy insights. Always provide the best calculated annual energy savings (kWh), "
+                    "annual monetary savings (Rs/year), and estimated payback period based on the supplied data. "
+                    "Never say 'not calculable' or 'cannot be calculated'. If any commercial assumptions were used "
+                    "(such as IE3/IE4 upgrade efficiency, observed duty-cycle projected hours, or standard industrial tariffs), "
+                    "clearly state the assumptions alongside the concrete numbers so plant managers have immediate, decision-ready data. "
+                    "Include 2-3 specific technical recommendations (such as right-sizing opportunities if underloaded, VFD suitability, or power factor correction). "
+                    "Format cleanly with bullet points and plain text."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"COMPACT STUDY DATA:\n{compact_report_context}\n\nRETRIEVED TECHNICAL CONTEXT:\n{knowledge_text or 'No relevant reference material retrieved.'}",
+            },
+        ]
+        try:
+            response = await client.chat.completions.create(
+                model=model_name,
+                temperature=0.2,
+                max_tokens=1200,
+                messages=messages,
+            )
+        except Exception as model_err:
+            if any(k in str(model_err).lower() for k in ["model", "not found", "does not exist"]):
+                logger.warning("Model %s failed (%s), falling back to gpt-4o-mini", model_name, model_err)
+                response = await client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    temperature=0.2,
+                    max_tokens=1200,
+                    messages=messages,
+                )
+            else:
+                raise
         content = response.choices[0].message.content
         if not content:
             raise RuntimeError("OpenAI returned an empty report insight")

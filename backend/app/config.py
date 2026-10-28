@@ -61,10 +61,16 @@ class Settings(BaseSettings):
     
     # AI & RAG Configuration (OpenAI)
     OPENAI_API_KEY: Optional[str] = None
-    OPENAI_CHAT_MODEL: str = "gpt-4o-mini"
+    OPENAI_MODEL: Optional[str] = None
+    OPENAI_CHAT_MODEL: str = "gpt-5.6-luna"
     OPENAI_EMBED_MODEL: str = "text-embedding-3-small"
     RAG_TOP_K: int = 4
     RAG_CHAT_RATE_LIMIT: str = "10/minute"
+
+    def __init__(self, **values):
+        super().__init__(**values)
+        if self.OPENAI_MODEL:
+            self.OPENAI_CHAT_MODEL = self.OPENAI_MODEL
     
     # SMTP / Alerts (Optional)
     SMTP_ENABLED: bool = False

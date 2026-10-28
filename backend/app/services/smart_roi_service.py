@@ -392,24 +392,44 @@ Enterprises can leverage BEE energy efficiency incentives and state MSME capital
             "analysis": fallback_report,
             "sources": search_sources,
             "calculated_roi": roi_metrics,
+            "model_used": get_runtime_settings().OPENAI_CHAT_MODEL,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
+    model_name = get_runtime_settings().OPENAI_CHAT_MODEL or "gpt-5.6-luna"
     try:
-        response = await client.chat.completions.create(
-            model=get_runtime_settings().OPENAI_CHAT_MODEL,
-            temperature=0.25,
-            max_tokens=1500,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
+        try:
+            response = await client.chat.completions.create(
+                model=model_name,
+                temperature=0.25,
+                max_tokens=1500,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+        except Exception as model_err:
+            if any(k in str(model_err).lower() for k in ["model", "not found", "does not exist"]):
+                logger.warning("Primary model %s returned error (%s); falling back to gpt-4o-mini", model_name, model_err)
+                model_name = "gpt-4o-mini"
+                response = await client.chat.completions.create(
+                    model=model_name,
+                    temperature=0.25,
+                    max_tokens=1500,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                )
+            else:
+                raise
+
         ai_content = response.choices[0].message.content or "No response generated."
         return {
             "analysis": ai_content.strip(),
             "sources": search_sources,
             "calculated_roi": roi_metrics,
+            "model_used": model_name,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
     except Exception as exc:
@@ -418,6 +438,7 @@ Enterprises can leverage BEE energy efficiency incentives and state MSME capital
             "analysis": f"AI consultation temporarily unavailable ({exc}). However, all engineering and financial metrics above are calculated with 100% precision from telemetry.",
             "sources": search_sources,
             "calculated_roi": roi_metrics,
+            "model_used": model_name,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
