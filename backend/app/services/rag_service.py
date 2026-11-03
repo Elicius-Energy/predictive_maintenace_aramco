@@ -36,11 +36,11 @@ def build_chat_completion_kwargs(
     }
     if is_reasoning:
         kwargs["max_completion_tokens"] = max_tokens
+        kwargs["reasoning_effort"] = "none"
         # Reasoning models reject custom temperature values (only default 1.0 is valid)
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
-            kwargs["reasoning_effort"] = "none"
             kwargs["parallel_tool_calls"] = parallel_tool_calls
     else:
         kwargs["max_tokens"] = max_tokens
