@@ -104,6 +104,7 @@ class DeviceProfile(Base):
     machine_rpm_max = Column(Float, default=18000.0, nullable=True)
     machine_rpm_avg = Column(Float, default=16500.0, nullable=True)
     no_of_spindles = Column(Integer, default=1200, nullable=True)
+    doff_time_min = Column(Float, default=None, nullable=True)
     
     # 5. Inverter Details
     inverter_make = Column(String(255), default="Danfoss", nullable=True)
@@ -213,6 +214,10 @@ class Reading(Base):
     md_kw = Column(Float, nullable=True)
     md_kvar = Column(Float, nullable=True)
     md_kva = Column(Float, nullable=True)
+    
+    # Physical / Manual Motor Measurements
+    temperature = Column(Float, nullable=True)  # Motor frame / winding temperature in °C
+    rpm = Column(Float, nullable=True)          # Shaft speed in RPM
     
     # Full Raw JSON
     raw = Column(JSON, nullable=True)

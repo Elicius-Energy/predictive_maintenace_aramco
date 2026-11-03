@@ -329,7 +329,7 @@ class ExcelReportService:
         ws.write(row, 3, "Contact Number:", f_bold); ws.write(row, 4, profile.contact_number or "", f_cell)
         row += 1
         ws.write(row, 1, "Department:", f_bold); ws.write(row, 2, profile.department or "", f_cell)
-        ws.write(row, 3, "", f_cell); ws.write(row, 4, "", f_cell)
+        ws.write(row, 3, "EB Unit Cost in Rs:", f_bold); ws.write(row, 4, profile.electricity_tariff if profile.electricity_tariff is not None else "", f_num if profile.electricity_tariff is not None else f_cell)
         row += 2
 
         # 2. MOTOR NAME PLATE DETAILS
@@ -369,10 +369,12 @@ class ExcelReportService:
         ws.write(row, 1, "TPI:", f_bold); ws.write(row, 2, profile.machine_tpi or "", f_cell)
         ws.write(row, 3, "Raw Material:", f_bold); ws.write(row, 4, profile.raw_material or "", f_cell)
         row += 1
-        ws.write(row, 1, "Machine RPM – Maximum:", f_bold); ws.write(row, 2, profile.machine_rpm_max if profile.machine_rpm_max is not None else "", f_num if profile.machine_rpm_max is not None else f_cell)
-        ws.write(row, 3, "Machine RPM – Average:", f_bold); ws.write(row, 4, profile.machine_rpm_avg if profile.machine_rpm_avg is not None else "", f_num if profile.machine_rpm_avg is not None else f_cell)
+        ws.write(row, 1, "Spindle RPM – Maximum:", f_bold); ws.write(row, 2, profile.machine_rpm_max if profile.machine_rpm_max is not None else "", f_num if profile.machine_rpm_max is not None else f_cell)
+        ws.write(row, 3, "Spindle RPM – Average:", f_bold); ws.write(row, 4, profile.machine_rpm_avg if profile.machine_rpm_avg is not None else "", f_num if profile.machine_rpm_avg is not None else f_cell)
         row += 1
         ws.write(row, 1, "No. of Spindles:", f_bold); ws.write(row, 2, profile.no_of_spindles if profile.no_of_spindles is not None else "", f_num if profile.no_of_spindles is not None else f_cell)
+        doff_val = getattr(profile, "doff_time_min", None)
+        ws.write(row, 3, "Doff time in Min:", f_bold); ws.write(row, 4, doff_val if doff_val is not None else "", f_num if doff_val is not None else f_cell)
         row += 2
 
         # 4. INVERTER DETAILS
@@ -924,13 +926,16 @@ class ExcelReportService:
         headers = [
             "Timestamp (IST)", "Interval kWh", "Cumulative kWh", "Power (kW)",
             "kW L1", "kW L2", "kW L3", "Voltage L-L Avg (V)", "V12", "V23", "V31",
-            "Current Avg (A)", "I L1", "I L2", "I L3", "PF Avg", "PF L1", "PF L2", "PF L3", "Frequency (Hz)"
+            "Current Avg (A)", "I L1", "I L2", "I L3", "PF Avg", "PF L1", "PF L2", "PF L3", "Frequency (Hz)",
+            "Temperature (°C)", "Speed (RPM)"
         ]
         for col, h in enumerate(headers):
             ws.write(0, col, h, f_hdr)
             ws.set_column(col, col, 14)
 
+        last_row = 0
         for row, pt in enumerate(points, start=1):
+            last_row = row
             ws.write(row, 0, _to_ist_str(pt.get("ts", "")), f_cell)
             ws.write(row, 1, pt["kwh"] if pt["kwh"] is not None else "", f_num)
             ws.write(row, 2, pt["cum_kwh"] if pt["cum_kwh"] is not None else "", f_num)
@@ -955,6 +960,78 @@ class ExcelReportService:
             ws.write(row, 17, pt["pf2"] if pt["pf2"] is not None else "", f_num)
             ws.write(row, 18, pt["pf3"] if pt["pf3"] is not None else "", f_num)
             ws.write(row, 19, pt["freq"] if pt["freq"] is not None else "", f_num)
+            temp_val = pt.get("temperature")
+            rpm_val = pt.get("rpm")
+            ws.write(row, 20, temp_val if temp_val is not None else "", f_num if temp_val is not None else f_cell)
+            ws.write(row, 21, int(rpm_val) if rpm_val is not None else "", f_num if rpm_val is not None else f_cell)
+
+        # ── 8-READING PERIODIC CHECKPOINT AUDIT TABLE ─────────────────────────
+        # Follows client report standard: Total Duration / 8 checkpoints
+        r_idx = max(last_row + 2, 2)
+        ckpt_headers = [
+            "Sr no", "Timestamp (IST)", "Power (kW)", "Cumulative kWh",
+            "Voltage L-L Avg (V)", "Current Avg (A)", "PF Avg", "Frequency (Hz)", "Remarks"
+        ]
+        for c, h in enumerate(ckpt_headers):
+            ws.write(r_idx, c, h, f_hdr)
+        r_idx += 1
+
+        ws.write(r_idx, 0, "", f_cell)
+        ws.write(r_idx, 1, "Total Duration / 8", f_cell)
+        for c in range(2, len(ckpt_headers)):
+            ws.write(r_idx, c, "", f_cell)
+        r_idx += 1
+
+        ws.write(r_idx, 0, "", f_cell)
+        ws.write(r_idx, 1, "Reading required for 8 times", f_cell)
+        for c in range(2, len(ckpt_headers)):
+            ws.write(r_idx, c, "", f_cell)
+        r_idx += 1
+
+        # Extract 8 evenly spaced checkpoint samples from telemetry points
+        num_points = len(points)
+        checkpoints = []
+        if num_points > 0:
+            if num_points <= 8:
+                checkpoints = points[:num_points]
+            else:
+                step = (num_points - 1) / 7.0
+                for i in range(8):
+                    idx = int(round(i * step))
+                    idx = min(idx, num_points - 1)
+                    checkpoints.append(points[idx])
+
+        for sr in range(1, 9):
+            ws.write(r_idx, 0, sr, f_cell)
+            if sr - 1 < len(checkpoints):
+                c_pt = checkpoints[sr - 1]
+                vll = c_pt.get("vll_avg") if c_pt.get("vll_avg") is not None else c_pt.get("v_avg")
+                ws.write(r_idx, 1, _to_ist_str(c_pt.get("ts", "")), f_cell)
+                ws.write(r_idx, 2, c_pt.get("kw") if c_pt.get("kw") is not None else "", f_num if c_pt.get("kw") is not None else f_cell)
+                ws.write(r_idx, 3, c_pt.get("cum_kwh") if c_pt.get("cum_kwh") is not None else "", f_num if c_pt.get("cum_kwh") is not None else f_cell)
+                ws.write(r_idx, 4, vll if vll is not None else "", f_num if vll is not None else f_cell)
+                ws.write(r_idx, 5, c_pt.get("i_avg") if c_pt.get("i_avg") is not None else "", f_num if c_pt.get("i_avg") is not None else f_cell)
+                ws.write(r_idx, 6, c_pt.get("pf_avg") if c_pt.get("pf_avg") is not None else "", f_num if c_pt.get("pf_avg") is not None else f_cell)
+                ws.write(r_idx, 7, c_pt.get("freq") if c_pt.get("freq") is not None else "", f_num if c_pt.get("freq") is not None else f_cell)
+
+                # Remarks: Opening reading for #1, plus physical temperature/RPM if recorded
+                remarks_str = "Opening reading" if sr == 1 else ""
+                t_val = c_pt.get("temperature")
+                rpm_val = c_pt.get("rpm")
+                if t_val is not None or rpm_val is not None:
+                    meas = []
+                    if t_val is not None:
+                        meas.append(f"Temp: {t_val}°C")
+                    if rpm_val is not None:
+                        meas.append(f"RPM: {int(rpm_val)}")
+                    m_str = ", ".join(meas)
+                    remarks_str = f"{remarks_str} ({m_str})" if remarks_str else m_str
+
+                ws.write(r_idx, 8, remarks_str, f_cell)
+            else:
+                for c in range(1, len(ckpt_headers)):
+                    ws.write(r_idx, c, "", f_cell)
+            r_idx += 1
 
     def _write_sheet5_charts(self, ws, wb, points, num_pts):
         if num_pts < 2:

@@ -1,7 +1,7 @@
 """
 Device endpoints: registration, configuration, live cards, trends, period summaries, baselining, and alarms.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
@@ -515,4 +515,97 @@ async def consult_smart_roi_ai(
         include_web_search=req.include_web_search,
         db=db
     )
+
+
+class RecordManualReadingRequest(BaseModel):
+    temperature: float
+    rpm: float
+    target_time: Optional[str] = None
+
+
+@router.post("/{device_id}/record-manual")
+def record_manual_reading(
+    device_id: str,
+    payload: RecordManualReadingRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """
+    Record on-site temperature (°C) and RPM into the database attached to the nearest timestamp row.
+    If for a timestamp these values are not recorded, they remain empty (NULL).
+    """
+    require_device_access(user, device_id, db)
+
+    # 1. Parse target time or default to current UTC
+    target_dt = datetime.now(timezone.utc)
+    if payload.target_time:
+        try:
+            t_str = payload.target_time.replace(" ", "+").replace("Z", "+00:00")
+            target_dt = datetime.fromisoformat(t_str)
+            if target_dt.tzinfo is None:
+                target_dt = target_dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            target_dt = datetime.now(timezone.utc)
+
+    # 2. Find nearest reading row for this device in the dataset
+    reading_before = (
+        db.query(Reading)
+        .filter(Reading.device_id == device_id, Reading.ts <= target_dt)
+        .order_by(Reading.ts.desc())
+        .first()
+    )
+    reading_after = (
+        db.query(Reading)
+        .filter(Reading.device_id == device_id, Reading.ts >= target_dt)
+        .order_by(Reading.ts.asc())
+        .first()
+    )
+
+    nearest: Optional[Reading] = None
+    if reading_before and reading_after:
+        t_before = reading_before.ts if reading_before.ts.tzinfo else reading_before.ts.replace(tzinfo=timezone.utc)
+        t_after = reading_after.ts if reading_after.ts.tzinfo else reading_after.ts.replace(tzinfo=timezone.utc)
+        dt_before = abs((target_dt - t_before).total_seconds())
+        dt_after = abs((t_after - target_dt).total_seconds())
+        nearest = reading_before if dt_before <= dt_after else reading_after
+    elif reading_before:
+        nearest = reading_before
+    elif reading_after:
+        nearest = reading_after
+    else:
+        # Fallback to the latest reading if available
+        nearest = (
+            db.query(Reading)
+            .filter(Reading.device_id == device_id)
+            .order_by(Reading.ts.desc())
+            .first()
+        )
+
+    if not nearest:
+        raise HTTPException(
+            status_code=404,
+            detail="No telemetry dataset rows exist for this device to attach manual readings to."
+        )
+
+    # 3. Store temperature and RPM to this nearest row
+    nearest.temperature = round(float(payload.temperature), 2)
+    nearest.rpm = round(float(payload.rpm), 2)
+    db.commit()
+    db.refresh(nearest)
+
+    # Format timestamp for display in IST (+05:30)
+    ist_offset = timezone(timedelta(hours=5, minutes=30))
+    ts_aware = nearest.ts if nearest.ts.tzinfo else nearest.ts.replace(tzinfo=timezone.utc)
+    ist_str = ts_aware.astimezone(ist_offset).strftime("%d-%b-%Y %I:%M:%S %p IST")
+
+    return {
+        "success": True,
+        "device_id": device_id,
+        "matched_timestamp": nearest.ts.isoformat(),
+        "matched_timestamp_ist": ist_str,
+        "temperature": nearest.temperature,
+        "rpm": nearest.rpm,
+        "message": f"Recorded Temperature ({nearest.temperature} °C) and RPM ({int(nearest.rpm) if nearest.rpm.is_integer() else nearest.rpm}) to nearest reading row at {ist_str}."
+    }
+
 

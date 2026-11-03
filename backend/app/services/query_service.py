@@ -137,6 +137,20 @@ class QueryService:
                 for a in open_alerts
             ]
         }
+
+        # Latest recorded manual physical measurements (Temperature & RPM)
+        latest_manual = (
+            db.query(Reading)
+            .filter(Reading.device_id == device_id, (Reading.temperature.isnot(None) | Reading.rpm.isnot(None)))
+            .order_by(desc(Reading.ts))
+            .first()
+        )
+        cards["latest_manual"] = {
+            "temperature": latest_manual.temperature,
+            "rpm": latest_manual.rpm,
+            "ts": latest_manual.ts.isoformat()
+        } if latest_manual else None
+
         return cards
 
     def get_trend_charts(
@@ -223,7 +237,9 @@ class QueryService:
                     "v1n": None, "v2n": None, "v3n": None,
                     "i_avg": None, "i1": None, "i2": None, "i3": None,
                     "pf_avg": None, "pf1": None, "pf2": None, "pf3": None,
-                    "freq": None
+                    "freq": None,
+                    "temperature": None,
+                    "rpm": None
                 })
             else:
                 avg_kw = sum(v["t_kw"] for v in vals if v["t_kw"] is not None) / max(len(vals), 1)
@@ -299,7 +315,9 @@ class QueryService:
                     "pf1": pf1_val,
                     "pf2": pf2_val,
                     "pf3": pf3_val,
-                    "freq": self._safe_round(self._avg([v.get("freq") for v in vals]), 2)
+                    "freq": self._safe_round(self._avg([v.get("freq") for v in vals]), 2),
+                    "temperature": self._safe_round(self._avg([v.get("temperature") for v in vals if v.get("temperature") is not None]), 1),
+                    "rpm": self._safe_round(self._avg([v.get("rpm") for v in vals if v.get("rpm") is not None]), 0)
                 })
 
         return {"points": points, "alert_windows": alert_windows}
@@ -594,7 +612,9 @@ class QueryService:
                     "vll_avg": vll, "v12": v12_val, "v23": v23_val, "v31": v31_val,
                     "i_avg": r.i_avg, "i1": r.i1, "i2": r.i2, "i3": r.i3,
                     "pf_avg": r.pf_avg, "pf1": r.pf1, "pf2": r.pf2, "pf3": r.pf3,
-                    "freq": r.freq
+                    "freq": r.freq,
+                    "temperature": r.temperature,
+                    "rpm": r.rpm
                 })
         return buckets
 

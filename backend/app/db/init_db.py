@@ -21,6 +21,7 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     _ensure_user_columns()
     _ensure_report_profile_columns()
+    _ensure_reading_columns()
     
     # Check if database is PostgreSQL
     is_postgres = engine.dialect.name == "postgresql"
@@ -49,6 +50,7 @@ def _ensure_report_profile_columns():
             "rated_efficiency_pct": "FLOAT",
             "replacement_motor_rating_kw": "FLOAT",
             "replacement_motor_efficiency_pct": "FLOAT",
+            "doff_time_min": "FLOAT",
         }
         if engine.dialect.name == "sqlite":
             existing = {row[1] for row in conn.execute(text("PRAGMA table_info(device_profiles)"))}
@@ -58,6 +60,23 @@ def _ensure_report_profile_columns():
         elif engine.dialect.name == "postgresql":
             for name, sql_type in additions.items():
                 conn.execute(text(f"ALTER TABLE device_profiles ADD COLUMN IF NOT EXISTS {name} {sql_type}"))
+
+
+def _ensure_reading_columns():
+    """Add temperature and rpm fields to existing readings table."""
+    additions = {
+        "temperature": "FLOAT",
+        "rpm": "FLOAT",
+    }
+    with engine.begin() as conn:
+        if engine.dialect.name == "sqlite":
+            existing = {row[1] for row in conn.execute(text("PRAGMA table_info(readings)"))}
+            for name, sql_type in additions.items():
+                if name not in existing:
+                    conn.execute(text(f"ALTER TABLE readings ADD COLUMN {name} {sql_type}"))
+        elif engine.dialect.name == "postgresql":
+            for name, sql_type in additions.items():
+                conn.execute(text(f"ALTER TABLE readings ADD COLUMN IF NOT EXISTS {name} {sql_type}"))
 
 
 def _ensure_user_columns():

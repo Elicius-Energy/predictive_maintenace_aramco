@@ -721,6 +721,28 @@ class RAGService:
 
         chat_messages = [{"role": "system", "content": system_prompt}] + bounded_messages
 
+        def grounded_fallback() -> str:
+            """Return useful, strictly grounded guidance if the model service fails."""
+            context = rag_context
+            latest = next((m["content"] for m in reversed(bounded_messages) if m["role"] == "user"), "")
+            telemetry = context.split("LATEST TELEMETRY", 1)
+            if len(telemetry) > 1:
+                snapshot = telemetry[1].split("\n\n", 1)[0].strip()
+                if snapshot:
+                    return (
+                        "I couldn't reach the AI response service just now, but I can still give a safe next step. "
+                        "The latest available device snapshot is:\n" + snapshot + "\n\n"
+                        "For a loading-behaviour assessment, compare active kW with the motor's verified nameplate kW "
+                        "and review a representative time-series for starts, loaded periods, and idle periods. "
+                        "This snapshot alone cannot establish today's load pattern or efficiency. Please retry shortly "
+                        "for a data-window analysis."
+                    )
+            return (
+                "I couldn't reach the AI response service just now. No measurements were fabricated. "
+                "Please retry shortly; for a loading-behaviour assessment, ask for a specific period (for example, today) "
+                "so I can compare its power trend with the verified motor rating."
+            )
+
         # First model turn with tool calling enabled
         try:
             try:
@@ -808,9 +830,32 @@ class RAGService:
 
         except Exception as e:
             logger.error("Chatbot error: %s", str(e), exc_info=True)
-            yield "data: " + json.dumps({
-                "content": "Sorry, I couldn't complete that request. Please try a shorter question or a narrower time window."
-            }) + "\n\n"
+            # A failed tool/model pass should not be misreported as a bad user query.
+            # Retry once with compact context and no tools; this avoids repeated
+            # tool-planning failures and reduces prompt size on transient limits.
+            try:
+                latest_only = next((m for m in reversed(bounded_messages) if m["role"] == "user"), None)
+                if latest_only:
+                    retry = await client.chat.completions.create(
+                        model=runtime_settings.OPENAI_CHAT_MODEL,
+                        messages=[
+                            {"role": "system", "content": system_prompt[:7000] + "\nAnswer only from the supplied device context. If historical data is missing, say so and give safe general guidance."},
+                            {"role": "user", "content": latest_only["content"][-1200:]},
+                        ],
+                        max_tokens=500,
+                        stream=False,
+                    )
+                    retry_content = retry.choices[0].message.content
+                    if retry_content:
+                        for word in retry_content.split(" "):
+                            yield "data: " + json.dumps({"content": word + " "}) + "\n\n"
+                    else:
+                        yield "data: " + json.dumps({"content": grounded_fallback()}) + "\n\n"
+                else:
+                    yield "data: " + json.dumps({"content": grounded_fallback()}) + "\n\n"
+            except Exception:
+                logger.warning("Compact chat retry also failed", exc_info=True)
+                yield "data: " + json.dumps({"content": grounded_fallback()}) + "\n\n"
             yield "data: [DONE]\n\n"
 
     def _execute_tool(self, name: str, args: Dict[str, Any], db: Session) -> Dict[str, Any]:

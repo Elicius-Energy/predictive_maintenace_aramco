@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useDevice } from '../contexts/DeviceContext';
 import {
   Activity, Zap, Gauge, Flame, Clock, RefreshCw, AlertTriangle,
-  CheckCircle2, WifiOff, AlertCircle, Loader2
+  CheckCircle2, WifiOff, AlertCircle, Loader2, Thermometer, RotateCw, Check
 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
@@ -236,12 +236,23 @@ export const Dashboard: React.FC = () => {
   const [chartHint, setChartHint] = useState<string | null>(null);
   const [trendsLoading, setTrendsLoading] = useState(false);
 
+  // Manual physical motor measurements (Temperature & RPM)
+  const [inputTemp, setInputTemp] = useState<string>('');
+  const [inputRpm, setInputRpm] = useState<string>('');
+  const [recordingManual, setRecordingManual] = useState<boolean>(false);
+  const [manualSuccessMsg, setManualSuccessMsg] = useState<string | null>(null);
+  const [manualErrorMsg, setManualErrorMsg] = useState<string | null>(null);
+  const [latestManual, setLatestManual] = useState<any>(null);
+
   // 1. Polling for Live Cards (every 5 seconds)
   const fetchLive = async () => {
     if (!selectedDeviceId) return;
     try {
       const res = await axios.get(`/api/devices/${selectedDeviceId}/live`, { withCredentials: true });
       setLiveData(res.data);
+      if (res.data?.latest_manual) {
+        setLatestManual(res.data.latest_manual);
+      }
     } catch (err) {
       console.error('Error fetching live data:', err);
     }
@@ -313,6 +324,55 @@ export const Dashboard: React.FC = () => {
     const timer = setInterval(() => fetchTrendsAndSummary(true), 10000);
     return () => clearInterval(timer);
   }, [selectedDeviceId, startDate, startTime, endDate, endTime, interval]);
+
+  const handleRecordManualReadings = async () => {
+    if (!selectedDeviceId) return;
+    const tempNum = parseFloat(inputTemp);
+    const rpmNum = parseFloat(inputRpm);
+
+    if (isNaN(tempNum)) {
+      setManualErrorMsg('Please enter a valid motor temperature value (°C).');
+      return;
+    }
+    if (isNaN(rpmNum) || rpmNum <= 0) {
+      setManualErrorMsg('Please enter a valid motor speed (RPM > 0).');
+      return;
+    }
+
+    setRecordingManual(true);
+    setManualSuccessMsg(null);
+    setManualErrorMsg(null);
+
+    try {
+      const targetIso = analysisPreset === 'custom'
+        ? toIsoUtc(endDate, endTime)
+        : new Date().toISOString();
+
+      const res = await axios.post(`/api/devices/${selectedDeviceId}/record-manual`, {
+        temperature: tempNum,
+        rpm: rpmNum,
+        target_time: targetIso
+      }, { withCredentials: true });
+
+      if (res.data?.success) {
+        setManualSuccessMsg(res.data.message || `Recorded ${tempNum}°C and ${rpmNum} RPM to nearest telemetry row.`);
+        setLatestManual({
+          temperature: res.data.temperature,
+          rpm: res.data.rpm,
+          ts: res.data.matched_timestamp
+        });
+        setInputTemp('');
+        setInputRpm('');
+        // Refresh trends and summary immediately
+        fetchTrendsAndSummary(false);
+      }
+    } catch (err: any) {
+      console.error('Error recording manual measurements:', err);
+      setManualErrorMsg(err.response?.data?.detail || 'Failed to record manual measurements to database.');
+    } finally {
+      setRecordingManual(false);
+    }
+  };
 
   const toggleParam = (key: string) => {
     setActiveParams((prev: Record<string, boolean>) => ({ ...prev, [key]: !prev[key] }));
@@ -696,6 +756,94 @@ export const Dashboard: React.FC = () => {
           </div>
 
         </div>
+
+        {/* ── MANUAL MOTOR MEASUREMENTS: Temperature & RPM ─────────────── */}
+        <div className="p-3 bg-gradient-to-r from-slate-50 via-blue-50/25 to-slate-50 border border-slate-200/90 rounded-xl flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-blue-100/70 text-[#1F3A8A] flex items-center justify-center shrink-0">
+              <Thermometer className="w-4 h-4 text-rose-500" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-slate-800">Manual Motor Measurements</span>
+                {latestManual && (
+                  <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">
+                    Last: {latestManual.temperature} °C • {latestManual.rpm} RPM ({formatIstDateTime(latestManual.ts)})
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Enter on-site temperature and RPM to record them onto the nearest timestamp row in this dataset.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Temperature Input */}
+            <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2.5 py-1 shadow-2xs">
+              <Thermometer className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+              <span className="text-xs text-slate-500 font-semibold">Temp:</span>
+              <input
+                type="number"
+                step="0.1"
+                placeholder="e.g. 52.5"
+                value={inputTemp}
+                onChange={(e) => { setInputTemp(e.target.value); setManualSuccessMsg(null); setManualErrorMsg(null); }}
+                className="w-20 bg-transparent text-xs font-bold text-slate-800 focus:outline-hidden"
+              />
+              <span className="text-[10px] text-slate-400 font-bold">°C</span>
+            </div>
+
+            {/* RPM Input */}
+            <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2.5 py-1 shadow-2xs">
+              <RotateCw className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+              <span className="text-xs text-slate-500 font-semibold">RPM:</span>
+              <input
+                type="number"
+                step="1"
+                placeholder="e.g. 1480"
+                value={inputRpm}
+                onChange={(e) => { setInputRpm(e.target.value); setManualSuccessMsg(null); setManualErrorMsg(null); }}
+                className="w-20 bg-transparent text-xs font-bold text-slate-800 focus:outline-hidden"
+              />
+              <span className="text-[10px] text-slate-400 font-bold">RPM</span>
+            </div>
+
+            {/* Record Button */}
+            <button
+              onClick={handleRecordManualReadings}
+              disabled={recordingManual || !inputTemp.trim() || !inputRpm.trim()}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#1F3A8A] hover:bg-blue-900 disabled:opacity-40 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs"
+            >
+              {recordingManual ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Check className="w-3.5 h-3.5" />
+              )}
+              <span>Record</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Feedback Messages */}
+        {manualSuccessMsg && (
+          <div className="p-2.5 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-xl text-xs flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span className="font-semibold">{manualSuccessMsg}</span>
+            </div>
+            <button onClick={() => setManualSuccessMsg(null)} className="text-emerald-700 hover:text-emerald-900 font-bold text-sm ml-2 cursor-pointer">×</button>
+          </div>
+        )}
+        {manualErrorMsg && (
+          <div className="p-2.5 bg-rose-50 border border-rose-300 text-rose-800 rounded-xl text-xs flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span className="font-semibold">{manualErrorMsg}</span>
+            </div>
+            <button onClick={() => setManualErrorMsg(null)} className="text-rose-700 hover:text-rose-900 font-bold text-sm ml-2 cursor-pointer">×</button>
+          </div>
+        )}
 
         {/* Parameter Chips */}
         <div className="flex items-center gap-2 flex-wrap">
