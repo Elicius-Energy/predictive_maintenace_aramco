@@ -260,7 +260,13 @@ class ExcelReportService:
             ws4, points, fmt_header, fmt_cell, fmt_num, fmt_datetime
         )
 
-        # ── SHEET 5: Charts ───────────────────────────────────────────────
+        # ── SHEET 5: Data Summery sheet ───────────────────────────────────
+        ws_sum = workbook.add_worksheet("Data Summery sheet")
+        self._write_sheet_data_summary(
+            ws_sum, points, fmt_header, fmt_cell, fmt_num, fmt_cell_bold
+        )
+
+        # ── SHEET 6: Charts ───────────────────────────────────────────────
         ws5 = workbook.add_worksheet("Charts")
         self._write_sheet5_charts(
             ws5, workbook, points, len(points)
@@ -965,30 +971,30 @@ class ExcelReportService:
             ws.write(row, 20, temp_val if temp_val is not None else "", f_num if temp_val is not None else f_cell)
             ws.write(row, 21, int(rpm_val) if rpm_val is not None else "", f_num if rpm_val is not None else f_cell)
 
-        # ── 8-READING PERIODIC CHECKPOINT AUDIT TABLE ─────────────────────────
-        # Follows client report standard: Total Duration / 8 checkpoints
-        r_idx = max(last_row + 2, 2)
+    def _write_sheet_data_summary(self, ws, points, f_hdr, f_cell, f_num, f_bold):
+        """Writes the 8-checkpoint shift audit summary sheet ('Data Summery sheet')."""
+        ws.set_column(0, 0, 8)    # Sr no
+        ws.set_column(1, 1, 24)   # Timestamp
+        ws.set_column(2, 7, 16)   # Power, kWh, VLL, I, PF, Freq
+        ws.set_column(8, 8, 32)   # Remarks
+
         ckpt_headers = [
             "Sr no", "Timestamp (IST)", "Power (kW)", "Cumulative kWh",
             "Voltage L-L Avg (V)", "Current Avg (A)", "PF Avg", "Frequency (Hz)", "Remarks"
         ]
         for c, h in enumerate(ckpt_headers):
-            ws.write(r_idx, c, h, f_hdr)
-        r_idx += 1
+            ws.write(0, c, h, f_hdr)
 
-        ws.write(r_idx, 0, "", f_cell)
-        ws.write(r_idx, 1, "Total Duration / 8", f_cell)
+        ws.write(1, 0, "", f_cell)
+        ws.write(1, 1, "Total Duration / 8", f_cell)
         for c in range(2, len(ckpt_headers)):
-            ws.write(r_idx, c, "", f_cell)
-        r_idx += 1
+            ws.write(1, c, "", f_cell)
 
-        ws.write(r_idx, 0, "", f_cell)
-        ws.write(r_idx, 1, "Reading required for 8 times", f_cell)
+        ws.write(2, 0, "", f_cell)
+        ws.write(2, 1, "Reading required for 8 times", f_cell)
         for c in range(2, len(ckpt_headers)):
-            ws.write(r_idx, c, "", f_cell)
-        r_idx += 1
+            ws.write(2, c, "", f_cell)
 
-        # Extract 8 evenly spaced checkpoint samples from telemetry points
         num_points = len(points)
         checkpoints = []
         if num_points > 0:
@@ -1002,7 +1008,8 @@ class ExcelReportService:
                     checkpoints.append(points[idx])
 
         for sr in range(1, 9):
-            ws.write(r_idx, 0, sr, f_cell)
+            r_idx = sr + 2  # rows 3..10 (1-indexed row 4..11)
+            ws.write(r_idx, 0, sr, f_bold)
             if sr - 1 < len(checkpoints):
                 c_pt = checkpoints[sr - 1]
                 vll = c_pt.get("vll_avg") if c_pt.get("vll_avg") is not None else c_pt.get("v_avg")
@@ -1014,7 +1021,6 @@ class ExcelReportService:
                 ws.write(r_idx, 6, c_pt.get("pf_avg") if c_pt.get("pf_avg") is not None else "", f_num if c_pt.get("pf_avg") is not None else f_cell)
                 ws.write(r_idx, 7, c_pt.get("freq") if c_pt.get("freq") is not None else "", f_num if c_pt.get("freq") is not None else f_cell)
 
-                # Remarks: Opening reading for #1, plus physical temperature/RPM if recorded
                 remarks_str = "Opening reading" if sr == 1 else ""
                 t_val = c_pt.get("temperature")
                 rpm_val = c_pt.get("rpm")
@@ -1031,7 +1037,6 @@ class ExcelReportService:
             else:
                 for c in range(1, len(ckpt_headers)):
                     ws.write(r_idx, c, "", f_cell)
-            r_idx += 1
 
     def _write_sheet5_charts(self, ws, wb, points, num_pts):
         if num_pts < 2:

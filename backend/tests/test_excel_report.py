@@ -90,6 +90,15 @@ def test_excel_report_generation(db_session):
     assert os.path.exists(path1)
     assert os.path.getsize(path1) > 2000  # Valid Excel file
 
+    import openpyxl
+    wb1 = openpyxl.load_workbook(path1)
+    assert "Energy Reading Report" in wb1.sheetnames
+    assert "Energy Saving & ROI" in wb1.sheetnames
+    assert "Analysis" in wb1.sheetnames
+    assert "Data" in wb1.sheetnames
+    assert "Data Summery sheet" in wb1.sheetnames
+    assert "Charts" in wb1.sheetnames
+
     # Generate second report -> auto-increments to 0002
     rep2, path2 = service.generate_report(
         device_id=dev_id,
