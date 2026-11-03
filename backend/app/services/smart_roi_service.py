@@ -13,7 +13,7 @@ from app.db.models import Device, DeviceProfile, Reading
 from app.services.query_service import query_service
 from app.services.excel_report_service import lookup_iec_efficiencies
 from app.services.web_search_service import search_web_for_motor_roi, MOTOR_MARKET_BENCHMARKS
-from app.services.rag_service import rag_service
+from app.services.rag_service import rag_service, build_chat_completion_kwargs
 from app.config import get_runtime_settings
 
 logger = logging.getLogger(__name__)
@@ -397,30 +397,20 @@ Enterprises can leverage BEE energy efficiency incentives and state MSME capital
         }
 
     model_name = get_runtime_settings().OPENAI_CHAT_MODEL or "gpt-5.6-luna"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
     try:
         try:
-            response = await client.chat.completions.create(
-                model=model_name,
-                temperature=0.25,
-                max_tokens=1500,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-            )
+            kw = build_chat_completion_kwargs(model_name, messages, max_tokens=1500, temperature=0.25)
+            response = await client.chat.completions.create(**kw)
         except Exception as model_err:
-            if any(k in str(model_err).lower() for k in ["model", "not found", "does not exist"]):
+            if any(k in str(model_err).lower() for k in ["model", "not found", "does not exist", "unsupported"]):
                 logger.warning("Primary model %s returned error (%s); falling back to gpt-4o-mini", model_name, model_err)
                 model_name = "gpt-4o-mini"
-                response = await client.chat.completions.create(
-                    model=model_name,
-                    temperature=0.25,
-                    max_tokens=1500,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                )
+                kw_fb = build_chat_completion_kwargs(model_name, messages, max_tokens=1500, temperature=0.25)
+                response = await client.chat.completions.create(**kw_fb)
             else:
                 raise
 

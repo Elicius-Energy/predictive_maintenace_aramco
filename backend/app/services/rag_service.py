@@ -17,6 +17,42 @@ from app.services.query_service import query_service
 logger = logging.getLogger(__name__)
 
 
+def build_chat_completion_kwargs(
+    model_name: str,
+    messages: list,
+    max_tokens: int = 1000,
+    temperature: Optional[float] = None,
+    tools: Optional[list] = None,
+    tool_choice: Optional[str] = None,
+    stream: bool = False,
+    parallel_tool_calls: bool = False,
+) -> dict:
+    """Build kwargs compatible with both reasoning models (gpt-5.6-luna, o1, o3) and standard models."""
+    is_reasoning = any(k in (model_name or "").lower() for k in ["gpt-5", "luna", "o1", "o3", "reasoning"])
+    kwargs: Dict[str, Any] = {
+        "model": model_name,
+        "messages": messages,
+        "stream": stream,
+    }
+    if is_reasoning:
+        kwargs["max_completion_tokens"] = max_tokens
+        # Reasoning models reject custom temperature values (only default 1.0 is valid)
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = tool_choice or "auto"
+            kwargs["reasoning_effort"] = "none"
+            kwargs["parallel_tool_calls"] = parallel_tool_calls
+    else:
+        kwargs["max_tokens"] = max_tokens
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = tool_choice or "auto"
+            kwargs["parallel_tool_calls"] = parallel_tool_calls
+    return kwargs
+
+
 # ── Safe Read-Only Parameterized Tools ─────────────────────────────────────────
 
 def tool_get_latest_reading(device_id: str, db: Session) -> Dict[str, Any]:
@@ -350,21 +386,13 @@ class RAGService:
             },
         ]
         try:
-            response = await client.chat.completions.create(
-                model=model_name,
-                temperature=0.2,
-                max_tokens=1200,
-                messages=messages,
-            )
+            kw = build_chat_completion_kwargs(model_name, messages, max_tokens=1200, temperature=0.2)
+            response = await client.chat.completions.create(**kw)
         except Exception as model_err:
-            if any(k in str(model_err).lower() for k in ["model", "not found", "does not exist"]):
+            if any(k in str(model_err).lower() for k in ["model", "not found", "does not exist", "unsupported"]):
                 logger.warning("Model %s failed (%s), falling back to gpt-4o-mini", model_name, model_err)
-                response = await client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    temperature=0.2,
-                    max_tokens=1200,
-                    messages=messages,
-                )
+                fallback_kw = build_chat_completion_kwargs("gpt-4o-mini", messages, max_tokens=1200, temperature=0.2)
+                response = await client.chat.completions.create(**fallback_kw)
             else:
                 raise
         content = response.choices[0].message.content
@@ -746,15 +774,16 @@ class RAGService:
         # First model turn with tool calling enabled
         try:
             try:
-                response = await client.chat.completions.create(
-                    model=runtime_settings.OPENAI_CHAT_MODEL,
-                    messages=chat_messages,
+                kw_turn1 = build_chat_completion_kwargs(
+                    runtime_settings.OPENAI_CHAT_MODEL,
+                    chat_messages,
+                    max_tokens=900,
                     tools=TOOL_DEFINITIONS,
                     tool_choice="auto",
                     parallel_tool_calls=False,
-                    max_tokens=900,
-                    stream=False
+                    stream=False,
                 )
+                response = await client.chat.completions.create(**kw_turn1)
             except Exception as first_error:
                 error_text = str(first_error).lower()
                 if "context_length_exceeded" not in error_text and "maximum context length" not in error_text:
@@ -765,15 +794,16 @@ class RAGService:
                     {"role": "system", "content": system_prompt[:7000]},
                     {"role": "user", "content": latest_only["content"][-1200:]},
                 ]
-                response = await client.chat.completions.create(
-                    model=runtime_settings.OPENAI_CHAT_MODEL,
-                    messages=compact_messages,
+                kw_compact = build_chat_completion_kwargs(
+                    runtime_settings.OPENAI_CHAT_MODEL,
+                    compact_messages,
+                    max_tokens=700,
                     tools=TOOL_DEFINITIONS,
                     tool_choice="auto",
                     parallel_tool_calls=False,
-                    max_tokens=700,
                     stream=False,
                 )
+                response = await client.chat.completions.create(**kw_compact)
                 chat_messages = compact_messages
             choice = response.choices[0]
             message = choice.message
@@ -809,12 +839,13 @@ class RAGService:
                     })
 
                 # Stream the final model synthesis
-                stream = await client.chat.completions.create(
-                    model=runtime_settings.OPENAI_CHAT_MODEL,
-                    messages=chat_messages,
+                kw_stream = build_chat_completion_kwargs(
+                    runtime_settings.OPENAI_CHAT_MODEL,
+                    chat_messages,
                     max_tokens=900,
-                    stream=True
+                    stream=True,
                 )
+                stream = await client.chat.completions.create(**kw_stream)
                 async for chunk in stream:
                     delta = chunk.choices[0].delta
                     if delta and delta.content:
@@ -836,15 +867,16 @@ class RAGService:
             try:
                 latest_only = next((m for m in reversed(bounded_messages) if m["role"] == "user"), None)
                 if latest_only:
-                    retry = await client.chat.completions.create(
-                        model=runtime_settings.OPENAI_CHAT_MODEL,
-                        messages=[
+                    kw_retry = build_chat_completion_kwargs(
+                        runtime_settings.OPENAI_CHAT_MODEL,
+                        [
                             {"role": "system", "content": system_prompt[:7000] + "\nAnswer only from the supplied device context. If historical data is missing, say so and give safe general guidance."},
                             {"role": "user", "content": latest_only["content"][-1200:]},
                         ],
                         max_tokens=500,
                         stream=False,
                     )
+                    retry = await client.chat.completions.create(**kw_retry)
                     retry_content = retry.choices[0].message.content
                     if retry_content:
                         for word in retry_content.split(" "):
