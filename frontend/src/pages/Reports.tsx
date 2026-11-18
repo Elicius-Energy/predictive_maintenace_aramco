@@ -4,6 +4,7 @@ import { useDevice } from '../contexts/DeviceContext';
 import {
   FileSpreadsheet, Download, RefreshCw, AlertCircle, Eye, Trash2
 } from 'lucide-react';
+import { TimeInputWithAmPm } from '../components/common/TimeInputWithAmPm';
 
 export const Reports: React.FC = () => {
   const { devices, selectedDevice, selectedDeviceId } = useDevice();
@@ -51,7 +52,7 @@ export const Reports: React.FC = () => {
   };
 
   // Study Form State (with sensible defaults)
-  const [preset, setPreset] = useState<'1h' | '8h' | '24h' | '7d'>('8h');
+  const [preset, setPreset] = useState<'1h' | '8h' | '24h' | '7d' | 'custom'>('8h');
   const [startDate, setStartDate] = useState(() => getIstDateAndTime(new Date(Date.now() - 8 * 3600 * 1000)).date);
   const [startTime, setStartTime] = useState(() => getIstDateAndTime(new Date(Date.now() - 8 * 3600 * 1000)).time);
   const [endDate, setEndDate] = useState(() => getIstDateAndTime(new Date()).date);
@@ -365,7 +366,7 @@ export const Reports: React.FC = () => {
   }
 
   return (
-    <div className="max-w-5xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-8">
+    <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 space-y-6">
       
       {/* Page Header */}
       <div>
@@ -412,54 +413,67 @@ export const Reports: React.FC = () => {
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
-            <div className="bg-slate-50 border border-slate-300 rounded-lg p-2.5">
-            <label className="block text-slate-500 font-semibold mb-1">Start Date & Time (IST)</label>
-              <div className="flex gap-1.5">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+            {/* Start Date & Time */}
+            <div className="bg-slate-50 border border-slate-300 rounded-xl p-3 flex flex-col justify-between">
+              <label className="block text-slate-600 font-semibold mb-1.5">Start Date & Time (IST)</label>
+              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                 <input
                   type="date"
                   value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="bg-white border border-slate-200 rounded-md p-1.5 w-full font-medium text-slate-800"
+                  onChange={(e) => {
+                    setStartDate(e.target.value);
+                    setPreset('custom');
+                  }}
+                  className="bg-white border border-slate-300 rounded-md h-[32px] px-2 text-xs font-semibold text-slate-800 flex-1 min-w-[125px] focus:border-[#1F3A8A] focus:outline-hidden shadow-2xs"
                 />
-                <input
-                  type="time"
+                <TimeInputWithAmPm
                   value={startTime}
-                  onChange={(e) => setStartTime(e.target.value)}
-                  className="bg-white border border-slate-200 rounded-md p-1.5 font-medium text-slate-800"
+                  onChange={(val24) => {
+                    setStartTime(val24);
+                    setPreset('custom');
+                  }}
                 />
               </div>
             </div>
 
-            <div className="bg-slate-50 border border-slate-300 rounded-lg p-2.5">
-            <label className="block text-slate-500 font-semibold mb-1">End Date & Time (IST)</label>
-              <div className="flex gap-1.5">
+            {/* End Date & Time */}
+            <div className="bg-slate-50 border border-slate-300 rounded-xl p-3 flex flex-col justify-between">
+              <label className="block text-slate-600 font-semibold mb-1.5">End Date & Time (IST)</label>
+              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                 <input
                   type="date"
                   value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="bg-white border border-slate-200 rounded-md p-1.5 w-full font-medium text-slate-800"
+                  onChange={(e) => {
+                    setEndDate(e.target.value);
+                    setPreset('custom');
+                  }}
+                  className="bg-white border border-slate-300 rounded-md h-[32px] px-2 text-xs font-semibold text-slate-800 flex-1 min-w-[125px] focus:border-[#1F3A8A] focus:outline-hidden shadow-2xs"
                 />
-                <input
-                  type="time"
+                <TimeInputWithAmPm
                   value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
-                  className="bg-white border border-slate-200 rounded-md p-1.5 font-medium text-slate-800"
+                  onChange={(val24) => {
+                    setEndTime(val24);
+                    setPreset('custom');
+                  }}
                 />
               </div>
             </div>
 
-            <div className="bg-slate-50 border border-slate-300 rounded-lg p-2.5">
-              <label className="block text-slate-500 font-semibold mb-1">Data Bucketing Interval</label>
-              <select
-                value={interval}
-                onChange={(e) => setIntervalVal(e.target.value as any)}
-                className="bg-white border border-slate-200 rounded-md p-1.5 w-full font-semibold text-slate-800 cursor-pointer"
-              >
-                <option value="1-minute">1-minute resolution</option>
-                <option value="5-minute">5-minute resolution</option>
-                <option value="1-hour">1-hour resolution</option>
-              </select>
+            {/* Data Bucketing Interval */}
+            <div className="bg-slate-50 border border-slate-300 rounded-xl p-3 flex flex-col justify-between md:col-span-2 lg:col-span-1">
+              <label className="block text-slate-600 font-semibold mb-1.5">Data Bucketing Interval</label>
+              <div className="flex items-center">
+                <select
+                  value={interval}
+                  onChange={(e) => setIntervalVal(e.target.value as any)}
+                  className="bg-white border border-slate-300 rounded-md h-[32px] px-2.5 w-full text-xs font-semibold text-slate-800 cursor-pointer focus:border-[#1F3A8A] focus:outline-hidden shadow-2xs"
+                >
+                  <option value="1-minute">1-minute resolution</option>
+                  <option value="5-minute">5-minute resolution</option>
+                  <option value="1-hour">1-hour resolution</option>
+                </select>
+              </div>
             </div>
           </div>
         </div>

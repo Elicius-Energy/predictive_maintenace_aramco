@@ -11,6 +11,7 @@ import {
   PieChart, Pie, Cell
 } from 'recharts';
 import { SmartRoiSection } from '../components/dashboard/SmartRoiSection';
+import { TimeInputWithAmPm } from '../components/common/TimeInputWithAmPm';
 import {
   uploadMachineScreenImage,
   type MachineScreenOcrResponse,
@@ -830,7 +831,7 @@ export const Dashboard: React.FC = () => {
 
           {/* Date & Time Pickers */}
           <div className="flex items-center gap-2 flex-wrap text-xs">
-            <div className="flex items-center gap-1 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1">
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1">
               <span className="text-slate-400 font-medium">From:</span>
               <input
                 type="date"
@@ -838,15 +839,13 @@ export const Dashboard: React.FC = () => {
                 onChange={(e) => { setStartDate(e.target.value); setAnalysisPreset('custom'); }}
                 className="bg-transparent font-medium text-slate-700 focus:outline-hidden"
               />
-              <input
-                type="time"
+              <TimeInputWithAmPm
                 value={startTime}
-                onChange={(e) => { setStartTime(e.target.value); setAnalysisPreset('custom'); }}
-                className="bg-transparent font-medium text-slate-700 focus:outline-hidden"
+                onChange={(val24) => { setStartTime(val24); setAnalysisPreset('custom'); }}
               />
             </div>
 
-            <div className="flex items-center gap-1 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1">
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded-lg px-2 py-1">
               <span className="text-slate-400 font-medium">To:</span>
               <input
                 type="date"
@@ -854,11 +853,9 @@ export const Dashboard: React.FC = () => {
                 onChange={(e) => { setEndDate(e.target.value); setAnalysisPreset('custom'); }}
                 className="bg-transparent font-medium text-slate-700 focus:outline-hidden"
               />
-              <input
-                type="time"
+              <TimeInputWithAmPm
                 value={endTime}
-                onChange={(e) => { setEndTime(e.target.value); setAnalysisPreset('custom'); }}
-                className="bg-transparent font-medium text-slate-700 focus:outline-hidden"
+                onChange={(val24) => { setEndTime(val24); setAnalysisPreset('custom'); }}
               />
             </div>
 
