@@ -6,7 +6,7 @@ import io
 import csv
 import os
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import FileResponse, StreamingResponse
@@ -182,23 +182,37 @@ def download_raw_data(
         .all()
     )
 
+    IST = timezone(timedelta(hours=5, minutes=30))
+
+    def _fmt_ist_date_time(dt: Optional[datetime]):
+        if not dt:
+            return "", ""
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        ist_dt = dt.astimezone(IST)
+        return ist_dt.strftime("%d-%b-%Y"), ist_dt.strftime("%H:%M:%S")
+
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        "Timestamp_UTC", "Device_ID", "v1n", "v2n", "v3n", "vln_avg",
+        "Date (IST)", "Time (IST)", "Device_ID", "v1n", "v2n", "v3n", "vln_avg",
         "v12", "v23", "v31", "vll_avg", "i1", "i2", "i3", "i_avg",
         "kw1", "kw2", "kw3", "t_kw", "kvar1", "kvar2", "kvar3", "t_kvar",
         "kva1", "kva2", "kva3", "t_kva", "pf1", "pf2", "pf3", "pf_avg",
-        "freq", "kwh_imp", "kvarh_imp", "t_kvah", "md_kw", "md_kva"
+        "freq", "kwh_imp", "kvarh_imp", "t_kvah", "md_kw", "md_kva",
+        "temperature_c", "rpm"
     ])
 
     for r in readings:
+        date_str, time_str = _fmt_ist_date_time(r.ts)
         writer.writerow([
-            r.ts.isoformat(), r.device_id, r.v1n, r.v2n, r.v3n, r.vln_avg,
+            date_str, time_str, r.device_id, r.v1n, r.v2n, r.v3n, r.vln_avg,
             r.v12, r.v23, r.v31, r.vll_avg, r.i1, r.i2, r.i3, r.i_avg,
             r.kw1, r.kw2, r.kw3, r.t_kw, r.kvar1, r.kvar2, r.kvar3, r.t_kvar,
             r.kva1, r.kva2, r.kva3, r.t_kva, r.pf1, r.pf2, r.pf3, r.pf_avg,
-            r.freq, r.kwh_imp, r.kvarh_imp, r.t_kvah, r.md_kw, r.md_kva
+            r.freq, r.kwh_imp, r.kvarh_imp, r.t_kvah, r.md_kw, r.md_kva,
+            r.temperature if r.temperature is not None else "",
+            int(r.rpm) if r.rpm is not None else ""
         ])
 
     output.seek(0)

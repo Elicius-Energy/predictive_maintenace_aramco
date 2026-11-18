@@ -113,7 +113,8 @@ def test_rule1_ct_polarity_negative_power(db_session):
     status, chips = engine.evaluate_reading(dev, prof, None, faulty_payload, now, db_session)
     assert status == "Incorrect connection"
     assert chips["ct_l2"] == "Incorrect connection"
-    assert "wrong direction" in chips["ct_l2_detail"]
+    assert chips["ct_l2_label"] == "Reverse CT"
+    assert "reverse ct" in chips["ct_l2_detail"].lower()
     assert chips["ct_l1"] == "Normal"
     assert chips["ct_l3"] == "Normal"
 
@@ -126,7 +127,7 @@ def test_rule1_ct_polarity_negative_power(db_session):
 
 def test_rule1_all_cts_reversed(db_session):
     """
-    If all three phases have negative power, note 'all CTs reversed or reverse power flow'.
+    If all three phases have negative power, all three CTs show Reverse CT.
     """
     engine = FaultEngine()
     dev = db_session.query(Device).first()
@@ -143,12 +144,14 @@ def test_rule1_all_cts_reversed(db_session):
         status, chips = engine.evaluate_reading(dev, prof, None, faulty_payload, now, db_session)
 
     assert status == "Incorrect connection"
-    assert "All CTs reversed" in chips["ct_l1_detail"]
+    assert chips["ct_l1_label"] == "Reverse CT"
+    assert chips["ct_l2_label"] == "Reverse CT"
+    assert chips["ct_l3_label"] == "Reverse CT"
 
 
 def test_rule2_ct_disconnected_vs_stopped_motor(db_session):
     """
-    Rule 2: Voltage present, i_n < 0.05 A, at least one other active.
+    Rule 2: Only one CT shows zero current while the other two carry load -> CT not connected.
     If all 3 currents ~0, motor is stopped (NOT a fault).
     """
     engine = FaultEngine()
@@ -167,7 +170,8 @@ def test_rule2_ct_disconnected_vs_stopped_motor(db_session):
 
     assert status == "Disconnected"
     assert chips["ct_l3"] == "Disconnected"
-    assert "disconnected" in chips["ct_l3_detail"].lower()
+    assert chips["ct_l3_label"] == "CT not connected"
+    assert "not connected" in chips["ct_l3_detail"].lower()
     assert chips["ct_l1"] == "Normal"
 
     # Reset engine
@@ -191,30 +195,9 @@ def test_rule2_ct_disconnected_vs_stopped_motor(db_session):
     assert chips["ct_l3"] == "Normal"
 
 
-def test_rule3_ct_swap_connection_incorrect(db_session):
+def test_rule5_voltage_clip_missing_and_imbalanced(db_session):
     """
-    Rule 3: Phase swap (PF differs from median of other two by > 0.25).
-    """
-    engine = FaultEngine()
-    dev = db_session.query(Device).first()
-    prof = dev.profile
-    now = datetime.now(timezone.utc)
-
-    payload_swap = dict(SAMPLE_NORMAL_PAYLOAD)
-    # pf1 = 0.82, pf3 = 0.80. If pf2 = 0.40, diff from 0.81 is 0.41 > 0.25
-    payload_swap["pf2"] = 0.40
-
-    for _ in range(3):
-        status, chips = engine.evaluate_reading(dev, prof, None, payload_swap, now, db_session)
-
-    assert status == "Warning"
-    assert chips["ct_l2"] == "Warning"
-    assert "phase swap" in chips["ct_l2_detail"]
-
-
-def test_rule5_voltage_clip_disconnected(db_session):
-    """
-    Rule 5: Voltage on phase drops below 50 V while device is online.
+    Clip Rule: Voltage missing (<50 V) or highly imbalanced on a phase flags 'Check clip' for that phase.
     """
     engine = FaultEngine()
     dev = db_session.query(Device).first()
@@ -222,54 +205,48 @@ def test_rule5_voltage_clip_disconnected(db_session):
     now = datetime.now(timezone.utc)
 
     payload_clip = dict(SAMPLE_NORMAL_PAYLOAD)
-    payload_clip["v1n"] = 12.4  # Clip fallen off
+    payload_clip["v1n"] = 12.4  # Clip fallen off on L1
 
     for _ in range(3):
         status, chips = engine.evaluate_reading(dev, prof, None, payload_clip, now, db_session)
 
     assert status == "Disconnected"
     assert chips["vclip_l1"] == "Disconnected"
-    assert "disconnected" in chips["vclip_l1_detail"].lower()
+    assert chips["vclip_l1_label"] == "Check clip"
+    assert "check clip l1" in chips["vclip_l1_detail"].lower()
+
+    # Highly imbalanced clip on L2 (e.g. 180 V vs 240 V on other phases)
+    engine2 = FaultEngine()
+    db_session.query(Alert).delete()
+    db_session.commit()
+    payload_imb = dict(SAMPLE_NORMAL_PAYLOAD)
+    payload_imb["v2n"] = 180.0
+
+    for _ in range(3):
+        status, chips = engine2.evaluate_reading(dev, prof, None, payload_imb, now, db_session)
+
+    assert status == "Warning"
+    assert chips["vclip_l2"] == "Warning"
+    assert chips["vclip_l2_label"] == "Check clip"
 
 
-def test_rule6_voltage_connection_incorrect(db_session):
+def test_sending_data_never_triggers_comm_failure(db_session):
     """
-    Rule 6: Line-to-line voltage differs from sqrt(3)*line-to-neutral by > 6%.
+    Active telemetry (even from 3P3W meters where kw1+kw2+kw3 != t_kw) must never trigger Communication failure.
     """
     engine = FaultEngine()
     dev = db_session.query(Device).first()
     prof = dev.profile
     now = datetime.now(timezone.utc)
 
-    # v1n = 240 V -> ideal v12 = ~415.7 V. Set v12 = 320 V (>20% error)
-    payload_vll = dict(SAMPLE_NORMAL_PAYLOAD)
-    payload_vll["v12"] = 320.0
+    payload_3p3w = dict(SAMPLE_NORMAL_PAYLOAD)
+    payload_3p3w["kw2"] = 0.0
+    payload_3p3w["t_kw"] = 3.0
 
     for _ in range(3):
-        status, chips = engine.evaluate_reading(dev, prof, None, payload_vll, now, db_session)
+        status, chips = engine.evaluate_reading(dev, prof, None, payload_3p3w, now, db_session)
 
-    assert status == "Incorrect connection"
-
-
-def test_rule9_sensor_comm_failure_power_mismatch(db_session):
-    """
-    Rule 9: t_kw differs from kw1+kw2+kw3 by > 5% + 0.05 kW.
-    """
-    engine = FaultEngine()
-    dev = db_session.query(Device).first()
-    prof = dev.profile
-    now = datetime.now(timezone.utc)
-
-    payload_err = dict(SAMPLE_NORMAL_PAYLOAD)
-    payload_err["kw1"] = 1.0
-    payload_err["kw2"] = 1.0
-    payload_err["kw3"] = 1.0
-    payload_err["t_kw"] = 10.0  # Big mismatch (10 vs 3)
-
-    for _ in range(3):
-        status, chips = engine.evaluate_reading(dev, prof, None, payload_err, now, db_session)
-
-    assert status == "Communication failure"
+    assert status == "Normal"
 
 
 def test_debounce_clear_logic(db_session):

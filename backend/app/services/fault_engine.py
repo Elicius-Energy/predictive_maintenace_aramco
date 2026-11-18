@@ -14,6 +14,149 @@ class FaultEngine:
     """
     Stateful fault detection engine with debouncing per (device_id, rule_type, phase).
     """
+    FROZEN_SAMPLE_COUNT = 30
+
+    # Rule types from earlier releases that are no longer evaluated. Any alert of
+    # these types still open in the database is cleared on startup.
+    RETIRED_RULE_TYPES = (
+        "sensor_comm_failure",
+        "ct_connection_incorrect",
+        "ct_position_changed",
+        "voltage_connection_incorrect",
+    )
+
+    # Short chip labels shown on the dashboard per rule type
+    CHIP_LABELS = {
+        "ct_polarity_incorrect": "Reverse CT",
+        "ct_disconnected": "CT not connected",
+        "current_signal_missing": "No signal",
+        "voltage_clip_disconnected": "Check clip",
+        "voltage_clip_imbalance": "Check clip",
+        "voltage_signal_missing": "No signal",
+    }
+
+    STATUS_PRECEDENCE = ["Communication failure", "Disconnected", "Incorrect connection", "Warning"]
+
+    @staticmethod
+    def _phase_voltages(v1n, v2n, v3n, v12, v23, v31) -> List[float]:
+        """
+        Per-phase voltage estimate used for clip checks.
+        Uses real phase-neutral values when the meter reports them (4-wire). For
+        3-wire meters (all V-LN zero / missing) derives a virtual phase value from
+        the two line-line voltages that involve that phase, so a missing clip on
+        L1 shows up as a low L1 value (V12 and V31 both drop).
+        """
+        ln = [v1n, v2n, v3n]
+        ll = [v12, v23, v31]
+        ln_usable = all(x is not None for x in ln) and any(float(x) > 0 for x in ln)
+        if ln_usable:
+            return [float(x) for x in ln]
+        if all(x is not None for x in ll):
+            a, b, c = (float(x) for x in ll)  # V12, V23, V31
+            s3 = 2.0 * math.sqrt(3.0)
+            return [(a + c) / s3, (a + b) / s3, (b + c) / s3]
+        return [float(x or 0.0) for x in ln]
+
+    def recompute_status(self, device: Device, db: Session, exclude_types: Tuple[str, ...] = ()) -> str:
+        """Derive device status from open, unacknowledged alerts."""
+        q = db.query(Alert).filter(
+            Alert.device_id == device.device_id,
+            Alert.cleared_at.is_(None),
+            Alert.acknowledged_at.is_(None),
+        )
+        if exclude_types:
+            q = q.filter(~Alert.type.in_(exclude_types))
+        severities = {a.severity for a in q.all()}
+        for s in self.STATUS_PRECEDENCE:
+            if s in severities:
+                return s
+        return "Normal"
+
+    def heal_live_device_status(self, device: Device, db: Session, now: Optional[datetime] = None) -> str:
+        """
+        Ensure a device that is actively sending data is never stuck in
+        'Communication failure' and has no lingering retired rule alerts.
+        """
+        if now is None:
+            now = datetime.now(timezone.utc)
+        dirty = False
+
+        # Clear any open retired-rule alerts for this device
+        retired_open = (
+            db.query(Alert)
+            .filter(
+                Alert.device_id == device.device_id,
+                Alert.type.in_(self.RETIRED_RULE_TYPES),
+                Alert.cleared_at.is_(None),
+            )
+            .all()
+        )
+        for a in retired_open:
+            a.cleared_at = now
+            dirty = True
+
+        # If the device has sent data within comm_timeout_s, clear any open comm failure alert
+        if device.last_seen and not self._comm_timed_out(device, now):
+            comm_open = (
+                db.query(Alert)
+                .filter(
+                    Alert.device_id == device.device_id,
+                    Alert.type == "device_comm_failure",
+                    Alert.cleared_at.is_(None),
+                )
+                .all()
+            )
+            for a in comm_open:
+                a.cleared_at = now
+                dirty = True
+            if dirty:
+                db.flush()
+            if device.status == "Communication failure" or dirty:
+                device.status = self.recompute_status(
+                    device, db, exclude_types=("device_comm_failure",) + self.RETIRED_RULE_TYPES
+                )
+                dirty = True
+
+        if dirty:
+            db.commit()
+        return device.status
+
+    def clear_retired_alerts(self, db: Session):
+        """Clear open alerts belonging to rule types that are no longer evaluated."""
+        now = datetime.now(timezone.utc)
+        stale = (
+            db.query(Alert)
+            .filter(Alert.type.in_(self.RETIRED_RULE_TYPES), Alert.cleared_at.is_(None))
+            .all()
+        )
+        affected = set()
+        for a in stale:
+            a.cleared_at = now
+            affected.add(a.device_id)
+        db.flush()
+        for dev in db.query(Device).filter(Device.device_id.in_(affected)).all() if affected else []:
+            if dev.status != "Communication failure" or not self._comm_timed_out(dev, now):
+                dev.status = self.recompute_status(dev, db)
+            detail = dict(dev.status_detail or {})
+            for k in ["ct_l1", "ct_l2", "ct_l3", "vclip_l1", "vclip_l2", "vclip_l3"]:
+                detail[k] = "Normal"
+                detail[f"{k}_detail"] = "Normal"
+                detail[f"{k}_label"] = "Normal"
+            dev.status_detail = detail
+
+    @staticmethod
+    def comm_timeout_s(device: Device) -> int:
+        interval = device.expected_interval_s or 60
+        return max(3 * interval, 180)
+
+    def _comm_timed_out(self, device: Device, now: datetime) -> bool:
+        if not device.last_seen:
+            return False
+        last_seen = device.last_seen
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        return (now - last_seen).total_seconds() > self.comm_timeout_s(device)
+
     def __init__(self):
         # Debounce state: key -> {"bad_count": int, "good_count": int}
         # Key format: (device_id, rule_type, phase)
@@ -93,201 +236,157 @@ class FaultEngine:
         # Map of (rule_type, phase, severity) -> (is_fault_active: bool, message: str, details: dict)
         checks: Dict[Tuple[str, Optional[str], str], Tuple[bool, str, Dict[str, Any]]] = {}
 
-        # ── Rule 7: Current signal not received ────────────────────────────
-        i_missing = any(x is None for x in [i1, i2, i3, i_avg])
+        # ── Rule A: Current signal not received ────────────────────────────
+        i_missing = any(x is None for x in [i1, i2, i3])
         checks[("current_signal_missing", None, "Disconnected")] = (
             i_missing,
-            "Current signal not received: one or more current values missing",
+            "Current signal not received: one or more phase currents missing",
             {"i1": i1, "i2": i2, "i3": i3, "i_avg": i_avg}
         )
 
-        # ── Rule 8: Voltage signal not received ────────────────────────────
-        v_missing = any(x is None for x in [v1n, v2n, v3n, v12, v23, v31, vln_avg, vll_avg])
+        # ── Rule B: Voltage signal not received ────────────────────────────
+        # A usable voltage set is either all three phase-neutral values (4-wire)
+        # or all three line-line values (3-wire meters).
+        has_ln = all(x is not None for x in [v1n, v2n, v3n])
+        has_ll = all(x is not None for x in [v12, v23, v31])
+        v_missing = not (has_ln or has_ll)
         checks[("voltage_signal_missing", None, "Disconnected")] = (
             v_missing,
-            "Voltage signal not received: one or more voltage values missing",
-            {"v1n": v1n, "v2n": v2n, "v3n": v3n, "vln_avg": vln_avg}
+            "Voltage signal not received: phase voltages missing",
+            {"v1n": v1n, "v2n": v2n, "v3n": v3n, "v12": v12, "v23": v23, "v31": v31}
         )
 
-        # ── Rule 9: Sensor communication failure ───────────────────────────
-        sensor_failure = False
-        sensor_reason = ""
-        # 1. Non-numeric or physical range
+        # ── Rule C: Sensor data quality (Warning only) ─────────────────────
+        # Data IS being received, so this must never be reported as a
+        # "Communication failure" (that status is reserved for the no-data watchdog).
+        data_invalid = False
+        data_reason = ""
+        non_numeric = False
         try:
-            for v in [v1n, v2n, v3n, vln_avg, v12, v23, v31, vll_avg]:
+            for v in [v1n, v2n, v3n, v12, v23, v31]:
                 if v is not None and (float(v) < 0 or float(v) > 600):
-                    sensor_failure = True
-                    sensor_reason = f"Voltage out of physical bounds: {v} V"
+                    data_invalid = True
+                    data_reason = f"Voltage out of physical bounds: {v} V"
             if freq is not None and (float(freq) < 40 or float(freq) > 60):
-                sensor_failure = True
-                sensor_reason = f"Frequency out of physical bounds: {freq} Hz"
-            # 2. t_kw differs from kw1+kw2+kw3 by > 5% + 0.05 kW
-            if all(x is not None for x in [t_kw, kw1, kw2, kw3]):
-                kw_sum = float(kw1) + float(kw2) + float(kw3)
-                diff = abs(float(t_kw) - kw_sum)
-                allowed_tol = 0.05 * abs(float(t_kw)) + 0.05
-                if diff > allowed_tol:
-                    sensor_failure = True
-                    sensor_reason = f"Active power mismatch: t_kw={t_kw} kW vs sum={kw_sum:.2f} kW (diff {diff:.2f} > {allowed_tol:.2f})"
+                data_invalid = True
+                data_reason = f"Frequency out of physical bounds: {freq} Hz"
         except (ValueError, TypeError) as conv_err:
-            sensor_failure = True
-            sensor_reason = f"Non-numeric telemetry: {conv_err}"
+            data_invalid = True
+            non_numeric = True
+            data_reason = f"Non-numeric telemetry: {conv_err}"
 
-        # 3. Frozen telemetry check (10 consecutive samples byte-identical)
+        # Frozen telemetry: the full electrical signature unchanged for 30 consecutive samples
         dev_id = device.device_id
-        if dev_id not in self._payload_history:
-            self._payload_history[dev_id] = []
-        hist = self._payload_history[dev_id]
-        current_sample = (v1n, v2n, v3n, i1, i2, i3, kw1, kw2, kw3)
+        hist = self._payload_history.setdefault(dev_id, [])
+        current_sample = (v12, v23, v31, v1n, v2n, v3n, i1, i2, i3, t_kw, pf1, pf2, pf3, freq, payload.get("t_kvar"))
         hist.append(current_sample)
-        if len(hist) > 10:
+        if len(hist) > self.FROZEN_SAMPLE_COUNT:
             hist.pop(0)
-        if len(hist) == 10 and all(s == current_sample for s in hist) and not sensor_failure:
-            sensor_failure = True
-            sensor_reason = "Frozen telemetry: readings unchanged for 10 consecutive samples"
+        if (
+            not data_invalid
+            and len(hist) == self.FROZEN_SAMPLE_COUNT
+            and all(s == current_sample for s in hist)
+            and any((x or 0) != 0 for x in (i1, i2, i3))
+        ):
+            data_invalid = True
+            data_reason = f"Frozen telemetry: readings unchanged for {self.FROZEN_SAMPLE_COUNT} consecutive samples"
 
-        checks[("sensor_comm_failure", None, "Communication failure")] = (
-            sensor_failure,
-            f"Sensor communication failure: {sensor_reason}" if sensor_failure else "Sensor communication normal",
-            {"reason": sensor_reason}
+        checks[("sensor_data_invalid", None, "Warning")] = (
+            data_invalid,
+            f"Sensor data check: {data_reason}" if data_invalid else "Sensor data normal",
+            {"reason": data_reason}
         )
 
-        # Proceed to electrical per-phase checks only if signals are numeric
-        if not (i_missing or v_missing or sensor_failure):
-            v_vals = [float(v1n), float(v2n), float(v3n)]
-            i_vals = [float(i1), float(i2), float(i3)]
-            kw_vals = [float(kw1), float(kw2), float(kw3)]
-            pf_vals = [float(pf1), float(pf2), float(pf3)]
+        # Proceed to per-phase CT / clip checks only when signals are present and numeric
+        if not (i_missing or v_missing or non_numeric):
             phases = ["L1", "L2", "L3"]
+            i_vals = [abs(float(i1)), abs(float(i2)), abs(float(i3))]
+            kw_vals = [float(kw1) if kw1 is not None else None,
+                       float(kw2) if kw2 is not None else None,
+                       float(kw3) if kw3 is not None else None]
+            v_phase = self._phase_voltages(v1n, v2n, v3n, v12, v23, v31)
 
-            # ── Rule 1: CT Polarity / Direction Incorrect (Reversed Connection)
-            # kw_n < -0.02 kW while i_n > 1.0 A -> Reversed CT wiring
-            all_reversed = all(kw < -0.02 and i > active_i for kw, i in zip(kw_vals, i_vals))
+            # ── CT Rule 1: Reverse CT ───────────────────────────────────────
+            # Negative active power on any CT while that CT carries current.
             for idx, phase in enumerate(phases):
-                is_reversed = kw_vals[idx] < -0.02 and i_vals[idx] > active_i
-                msg = "All CTs reversed or reverse power flow" if all_reversed else f"CT {phase} wrong direction / reversed connection: negative active power ({kw_vals[idx]:.2f} kW)"
+                kw = kw_vals[idx]
+                is_reversed = kw is not None and kw < -0.02 and i_vals[idx] > i_min
+                msg = (
+                    f"Reverse CT on {phase}: negative active power ({kw:.2f} kW). Check CT direction."
+                    if kw is not None else f"Reverse CT on {phase}"
+                )
                 checks[("ct_polarity_incorrect", phase, "Incorrect connection")] = (
                     is_reversed,
                     msg,
-                    {"reason": msg, "kw": kw_vals[idx], "i": i_vals[idx], "all_reversed": all_reversed}
+                    {"reason": msg, "kw": kw, "i": i_vals[idx]}
                 )
 
-            # ── Rule 2: CT Disconnected ────────────────────────────────────
-            # v_nn > 50 V AND i_n < 0.05 A AND at least one other phase active (> 1.0 A)
-            # If all three currents ~0 and voltage present: motor stopped / idle, NOT a fault!
-            all_stopped = all(i < i_min for i in i_vals) and all(v > v_min for v in v_vals)
+            # ── CT Rule 2: CT not connected ─────────────────────────────────
+            # Exactly one CT reads zero current while the other two carry current.
+            # All three at zero = motor stopped (not a fault).
+            ct_other_min = float(th.get("ct_other_min_a", 0.2))
+            zero_flags = [i < i_min for i in i_vals]
             for idx, phase in enumerate(phases):
-                other_active = any(i_vals[o] > active_i for o in range(3) if o != idx)
-                is_ct_disconnected = (v_vals[idx] > v_min) and (i_vals[idx] < i_min) and other_active and not all_stopped
-                msg = f"CT {phase} disconnected (voltage present {v_vals[idx]:.1f} V, current {i_vals[idx]:.3f} A)"
+                others = [i_vals[o] for o in range(3) if o != idx]
+                is_ct_open = (
+                    zero_flags[idx]
+                    and sum(zero_flags) == 1
+                    and all(o > ct_other_min for o in others)
+                )
+                msg = f"CT {phase} not connected: zero current ({i_vals[idx]:.2f} A) while other phases carry load"
                 checks[("ct_disconnected", phase, "Disconnected")] = (
-                    is_ct_disconnected,
+                    is_ct_open,
                     msg,
-                    {"reason": msg, "v": v_vals[idx], "i": i_vals[idx]}
+                    {"reason": msg, "i": i_vals[idx], "other_currents": others}
                 )
 
-            # ── Rule 3: CT Connection / Phase Swap (Warning) ───────────────
-            # pf_n differs from median of other two by > 0.25 (and kw_n >= -0.02)
-            # OR |pf_n| < 0.3 while others > 0.6
+            # ── Clip Rule: voltage missing or highly imbalanced on a phase ─
+            clip_tol = float(th.get("clip_imbalance_pct", 10.0)) / 100.0
             for idx, phase in enumerate(phases):
-                other_pfs = [pf_vals[o] for o in range(3) if o != idx]
-                other_median = (other_pfs[0] + other_pfs[1]) / 2.0
-                pf_diff = abs(pf_vals[idx] - other_median)
-                is_swap = (
-                    i_vals[idx] > active_i and
-                    kw_vals[idx] >= -0.02 and
-                    (pf_diff > float(th.get("ct_swap_pf_diff", 0.25)) or (abs(pf_vals[idx]) < 0.3 and all(p > 0.6 for p in other_pfs)))
+                v_k = v_phase[idx]
+                others = [v_phase[o] for o in range(3) if o != idx]
+                ref = max(others)
+                is_missing = v_k < v_min
+                is_imbalanced = (not is_missing) and ref > v_min and v_k < (1.0 - clip_tol) * ref
+                miss_msg = f"Check clip {phase}: voltage missing ({v_k:.1f} V)"
+                imb_msg = (
+                    f"Check clip {phase}: voltage highly imbalanced "
+                    f"({v_k:.1f} V vs {ref:.1f} V on other phases)"
                 )
-                msg = f"CT {phase} phase swap / PF imbalance (PF={pf_vals[idx]:.2f} vs others={other_median:.2f})"
-                checks[("ct_connection_incorrect", phase, "Warning")] = (
-                    is_swap,
-                    msg,
-                    {"reason": msg, "pf": pf_vals[idx], "other_median_pf": other_median, "diff": pf_diff}
-                )
-
-            # ── Rule 4: CT Position Changed ────────────────────────────────
-            # Baseline comparison: per-phase current share or PF deviates > tolerance (30%)
-            if baseline and baseline.per_phase_current_share and baseline.per_phase_pf:
-                tol_pct = float(baseline.tolerance_pct or th.get("baseline_tol_pct", 30.0))
-                total_i = sum(i_vals)
-                if total_i > 3.0:  # Running motor
-                    for idx, phase in enumerate(phases):
-                        share_key = f"i{idx+1}_share"
-                        pf_key = f"pf{idx+1}"
-                        curr_share = i_vals[idx] / total_i
-                        base_share = float(baseline.per_phase_current_share.get(share_key, curr_share))
-                        base_pf = float(baseline.per_phase_pf.get(pf_key, pf_vals[idx]))
-                        
-                        share_dev = abs(curr_share - base_share) / max(base_share, 0.01) * 100.0
-                        pf_dev = abs(pf_vals[idx] - base_pf) / max(abs(base_pf), 0.01) * 100.0
-                        has_pos_changed = (share_dev > tol_pct) or (pf_dev > tol_pct)
-                        checks[("ct_position_changed", phase, "Warning")] = (
-                            has_pos_changed,
-                            f"CT {phase} position changed: deviation from installation baseline > {tol_pct:.0f}%",
-                            {"share_dev_pct": share_dev, "pf_dev_pct": pf_dev, "tolerance": tol_pct}
-                        )
-
-            # ── Rule 5: Voltage Clip Disconnected ──────────────────────────
-            # v_nn < 50 V while device is online
-            for idx, phase in enumerate(phases):
-                is_clip_off = v_vals[idx] < v_min
                 checks[("voltage_clip_disconnected", phase, "Disconnected")] = (
-                    is_clip_off,
-                    f"Voltage clip {phase} disconnected (voltage {v_vals[idx]:.1f} V < {v_min} V)",
-                    {"voltage": v_vals[idx], "min_required": v_min}
+                    is_missing,
+                    miss_msg,
+                    {"reason": miss_msg, "voltage": v_k, "min_required": v_min}
+                )
+                checks[("voltage_clip_imbalance", phase, "Warning")] = (
+                    is_imbalanced,
+                    imb_msg,
+                    {"reason": imb_msg, "voltage": v_k, "reference": ref, "tolerance_pct": clip_tol * 100}
                 )
 
-            # ── Rule 6: Voltage Connection Incorrect ───────────────────────
-            # Any line-to-line voltage not within +-6% of sqrt(3) * line-to-neutral
-            # or vln_avg outside 80-120% of nominal voltage
-            sqrt3 = math.sqrt(3.0)
-            v_line_tol = float(th.get("v_line_tol_pct", 6.0)) / 100.0
-            
-            # Check v12 vs v1n, v23 vs v2n, v31 vs v3n
-            ll_pairs = [("L1-L2", float(v12), float(v1n)), ("L2-L3", float(v23), float(v2n)), ("L3-L1", float(v31), float(v3n))]
-            ll_mismatch = False
-            ll_details = {}
-            for label, v_ll, v_ln in ll_pairs:
-                ideal_ll = sqrt3 * v_ln
-                if ideal_ll > 50.0:
-                    diff_pct = abs(v_ll - ideal_ll) / ideal_ll
-                    if diff_pct > v_line_tol:
-                        ll_mismatch = True
-                        ll_details[label] = {"v_ll": v_ll, "ideal_ll": ideal_ll, "diff_pct": diff_pct * 100}
-
-            checks[("voltage_connection_incorrect", None, "Incorrect connection")] = (
-                ll_mismatch,
-                "Voltage connection incorrect: line-to-line vs line-to-neutral ratio error",
-                ll_details
-            )
-
-            # Check nominal range (80% - 120%)
-            v_nom_min = v_nom * float(th.get("v_nom_min_pct", 80.0)) / 100.0
-            v_nom_max = v_nom * float(th.get("v_nom_max_pct", 120.0)) / 100.0
-            avg_v = float(vln_avg) if vln_avg is not None else sum(v_vals) / 3.0
-            v_out_of_range = avg_v < v_nom_min or avg_v > v_nom_max
+            # ── Supply voltage out of nominal range (general warning) ──────
+            # Nominal values above 300 V are treated as line-line ratings.
+            v_nom_min_f = float(th.get("v_nom_min_pct", 80.0)) / 100.0
+            v_nom_max_f = float(th.get("v_nom_max_pct", 120.0)) / 100.0
+            if v_nom > 300.0:
+                ll_vals = [float(x) for x in (v12, v23, v31) if x is not None]
+                avg_v = (sum(ll_vals) / len(ll_vals)) if ll_vals else sum(v_phase) / 3.0 * math.sqrt(3.0)
+            else:
+                avg_v = sum(v_phase) / 3.0
+            v_out_of_range = avg_v < v_nom * v_nom_min_f or avg_v > v_nom * v_nom_max_f
             checks[("voltage_out_of_range", None, "Warning")] = (
                 v_out_of_range,
-                f"Voltage out of nominal range: {avg_v:.1f} V (nominal {v_nom} V +-20%)",
-                {"vln_avg": avg_v, "nominal": v_nom, "range": [v_nom_min, v_nom_max]}
+                f"Supply voltage out of nominal range: {avg_v:.1f} V (nominal {v_nom:.0f} V ±20%)",
+                {"avg_voltage": avg_v, "nominal": v_nom}
             )
 
         # ── Apply Debounce Logic and Update DB Alerts ──────────────────────
         active_severities: List[str] = []
-        phase_chips = {
-            "ct_l1": "Normal",
-            "ct_l2": "Normal",
-            "ct_l3": "Normal",
-            "vclip_l1": "Normal",
-            "vclip_l2": "Normal",
-            "vclip_l3": "Normal",
-            "ct_l1_detail": "Normal",
-            "ct_l2_detail": "Normal",
-            "ct_l3_detail": "Normal",
-            "vclip_l1_detail": "Normal",
-            "vclip_l2_detail": "Normal",
-            "vclip_l3_detail": "Normal",
-        }
+        phase_chips: Dict[str, str] = {}
+        for k in ["ct_l1", "ct_l2", "ct_l3", "vclip_l1", "vclip_l2", "vclip_l3"]:
+            phase_chips[k] = "Normal"
+            phase_chips[f"{k}_detail"] = "Normal"
+            phase_chips[f"{k}_label"] = "Normal"
 
         for (rule_type, phase, severity), (is_fault, message, details) in checks.items():
             debounce_key = (device.device_id, rule_type, phase)
@@ -348,8 +447,7 @@ class FaultEngine:
         # ── Compute Overall Status (Precedence order) ─────────────────────
         # Communication failure > Disconnected > Incorrect connection > Warning > Normal
         overall_status = "Normal"
-        precedence = ["Communication failure", "Disconnected", "Incorrect connection", "Warning"]
-        for sev in precedence:
+        for sev in self.STATUS_PRECEDENCE:
             if sev in active_severities:
                 overall_status = sev
                 break
@@ -384,9 +482,9 @@ class FaultEngine:
                 target_keys.append(f"vclip_{phase.lower()}")
             else:
                 target_keys.extend(["vclip_l1", "vclip_l2", "vclip_l3"])
-        elif rule_type == "sensor_comm_failure" or rule_type == "current_signal_missing":
+        elif rule_type == "current_signal_missing":
             target_keys.extend(["ct_l1", "ct_l2", "ct_l3"])
-        elif rule_type == "voltage_signal_missing" or rule_type == "voltage_connection_incorrect":
+        elif rule_type == "voltage_signal_missing":
             target_keys.extend(["vclip_l1", "vclip_l2", "vclip_l3"])
 
         for k in target_keys:
@@ -394,15 +492,20 @@ class FaultEngine:
             if severity_rank.get(severity, 0) >= severity_rank.get(curr_sev, 0):
                 chips[k] = severity
                 chips[f"{k}_detail"] = message
+                chips[f"{k}_label"] = self.CHIP_LABELS.get(rule_type, severity)
 
     def check_comm_watchdog(self, db: Session, now: datetime):
         """
         Watchdog checker: run every 30s to detect network/comm failure.
         IoT device comm failure: now - last_seen > max(3 * interval, 180s).
+        "Communication failure" is raised ONLY here (no data received). Once data
+        flows again the alert is cleared and the status is recomputed from the
+        remaining open, unacknowledged alerts on every cycle, so a device can never
+        stay stuck on "Communication failure" while it is sending data.
         """
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
-            
+
         devices = db.query(Device).all()
         for device in devices:
             if not device.last_seen:
@@ -410,53 +513,43 @@ class FaultEngine:
             last_seen = device.last_seen
             if last_seen.tzinfo is None:
                 last_seen = last_seen.replace(tzinfo=timezone.utc)
-            interval = device.expected_interval_s or 60
-            comm_timeout = max(3 * interval, 180)
+            comm_timeout = self.comm_timeout_s(device)
             elapsed = (now - last_seen).total_seconds()
-            
-            open_alert = (
+
+            open_comm_alerts = (
                 db.query(Alert)
                 .filter(
                     Alert.device_id == device.device_id,
                     Alert.type == "device_comm_failure",
                     Alert.cleared_at.is_(None)
                 )
-                .first()
+                .all()
             )
 
             if elapsed > comm_timeout:
-                if not open_alert:
-                    open_alert = Alert(
+                if not open_comm_alerts:
+                    db.add(Alert(
                         device_id=device.device_id,
                         type="device_comm_failure",
                         phase=None,
                         severity="Communication failure",
                         started_at=now,
-                        details={"elapsed_seconds": elapsed, "timeout": comm_timeout}
-                    )
-                    db.add(open_alert)
-                    device.status = "Communication failure"
+                        details={
+                            "elapsed_seconds": elapsed,
+                            "timeout": comm_timeout,
+                            "reason": f"No data received for {int(elapsed // 60)} min",
+                        }
+                    ))
+                device.status = "Communication failure"
             else:
-                if open_alert:
-                    open_alert.cleared_at = now
-                    # Recompute device status
-                    other_open = (
-                        db.query(Alert)
-                        .filter(
-                            Alert.device_id == device.device_id,
-                            Alert.cleared_at.is_(None)
-                        )
-                        .all()
+                for alert in open_comm_alerts:
+                    alert.cleared_at = now
+                if open_comm_alerts:
+                    db.flush()
+                if open_comm_alerts or device.status == "Communication failure":
+                    device.status = self.recompute_status(
+                        device, db, exclude_types=("device_comm_failure",) + self.RETIRED_RULE_TYPES
                     )
-                    if other_open:
-                        precedence = ["Communication failure", "Disconnected", "Incorrect connection", "Warning"]
-                        severities = [a.severity for a in other_open]
-                        for s in precedence:
-                            if s in severities:
-                                device.status = s
-                                break
-                    else:
-                        device.status = "Normal"
 
 
 fault_engine = FaultEngine()

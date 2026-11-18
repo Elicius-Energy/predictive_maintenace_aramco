@@ -597,6 +597,62 @@ export const Configuration: React.FC = () => {
                   className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
                 />
               </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">TPI (Twists per Inch)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 28.5"
+                  value={profile?.machine_tpi ?? ''}
+                  onChange={(e) => handleInputChange('machine_tpi', e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Spindle RPM – Maximum</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  placeholder="e.g. 18000"
+                  value={profile?.machine_rpm_max ?? ''}
+                  onChange={(e) => handleInputChange('machine_rpm_max', e.target.value === '' ? null : parseFloat(e.target.value))}
+                  className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Spindle RPM – Average</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  placeholder="e.g. 16500"
+                  value={profile?.machine_rpm_avg ?? ''}
+                  onChange={(e) => handleInputChange('machine_rpm_avg', e.target.value === '' ? null : parseFloat(e.target.value))}
+                  className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Raw Material</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 100% Combed Cotton"
+                  value={profile?.raw_material ?? ''}
+                  onChange={(e) => handleInputChange('raw_material', e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Doff Time (minutes)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  placeholder="e.g. 3"
+                  value={profile?.doff_time_min ?? ''}
+                  onChange={(e) => handleInputChange('doff_time_min', e.target.value === '' ? null : parseFloat(e.target.value))}
+                  className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
+                />
+              </div>
             </div>
           )}
         </div>

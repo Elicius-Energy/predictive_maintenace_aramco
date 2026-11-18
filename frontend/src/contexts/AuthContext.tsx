@@ -44,12 +44,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     checkAuth();
   }, []);
 
+  const clearDashboardSessionPrefs = () => {
+    try {
+      localStorage.removeItem('elicius_dashboard_period');
+      localStorage.removeItem('elicius_dashboard_active_params');
+      sessionStorage.removeItem('elicius_session_acked_alerts');
+    } catch {
+      // Ignore storage errors
+    }
+  };
+
   const login = async (username: string, password: string, mfaCode?: string) => {
     const res = await axios.post(
       '/api/auth/login',
       { username, password, mfa_code: mfaCode || null },
       { withCredentials: true }
     );
+    clearDashboardSessionPrefs();
     setUser(res.data);
   };
 
@@ -59,6 +70,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {
       // Ignore logout errors
     } finally {
+      clearDashboardSessionPrefs();
       setUser(null);
     }
   };

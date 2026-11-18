@@ -73,6 +73,7 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           border: 'border-emerald-200',
         };
       case 'Warning':
+      case 'Check clip':
         return {
           dot: 'bg-amber-500',
           bg: 'bg-amber-50',
@@ -81,6 +82,9 @@ export const DeviceProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         };
       case 'Incorrect connection':
       case 'Disconnected':
+      case 'Reverse CT':
+      case 'CT not connected':
+      case 'No signal':
         return {
           dot: 'bg-red-500',
           bg: 'bg-red-50',

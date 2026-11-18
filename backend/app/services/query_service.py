@@ -63,22 +63,30 @@ class QueryService:
         )
         today_kwh = self._integrate_energy([(r.ts, r.t_kw) for r in today_readings], expected_interval_s=device.expected_interval_s or 60)
 
-        # Active open alerts (exclude cleared)
+        # Heal any stale 'Communication failure' or retired-rule alerts when data is active
+        from app.services.fault_engine import fault_engine
+        effective_status = fault_engine.heal_live_device_status(device, db, now_utc)
+
+        # Active open alerts (exclude cleared, operator-acknowledged, and retired rules)
         open_alerts = (
             db.query(Alert)
             .filter(
                 Alert.device_id == device_id,
-                Alert.cleared_at.is_(None)
+                Alert.cleared_at.is_(None),
+                Alert.acknowledged_at.is_(None),
+                ~Alert.type.in_(fault_engine.RETIRED_RULE_TYPES)
             )
             .order_by(desc(Alert.started_at))
             .limit(10)
             .all()
         )
 
+        latest_kw1, latest_kw2, latest_kw3 = self._resolve_phase_powers(latest) if latest else (0.0, 0.0, 0.0)
+
         cards = {
             "device_id": device.device_id,
             "alias": device.alias or device.device_id,
-            "status": device.status,
+            "status": effective_status,
             "status_detail": device.status_detail or {},
             "last_seen_str": last_seen_str,
             "seconds_ago": seconds_ago,
@@ -102,9 +110,9 @@ class QueryService:
             },
             "power": {
                 "total": round(latest.t_kw, 2) if latest and latest.t_kw is not None else 0.0,
-                "kw1": round(latest.kw1, 2) if latest and latest.kw1 is not None else 0.0,
-                "kw2": round(latest.kw2, 2) if latest and latest.kw2 is not None else 0.0,
-                "kw3": round(latest.kw3, 2) if latest and latest.kw3 is not None else 0.0,
+                "kw1": round(latest_kw1, 2) if latest_kw1 is not None else 0.0,
+                "kw2": round(latest_kw2, 2) if latest_kw2 is not None else 0.0,
+                "kw3": round(latest_kw3, 2) if latest_kw3 is not None else 0.0,
                 "unit": "kW"
             },
             "energy": {
@@ -588,6 +596,38 @@ class QueryService:
                 total_kwh += ((kw_prev + kw_curr) / 2.0) * (dt / 3600.0)
         return total_kwh
 
+    def _resolve_phase_powers(self, r: Reading) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        """
+        Return (kw1, kw2, kw3) for a reading. If the reading came from a 3P3W
+        Two-Wattmeter meter where kw2 is 0 while t_kw and i2 are active, compute
+        individual phase powers using virtual-neutral apparent power weights.
+        """
+        kw1, kw2, kw3, t_kw = r.kw1, r.kw2, r.kw3, r.t_kw
+        if (kw2 is None or kw2 == 0.0) and t_kw is not None and abs(t_kw) > 0.001 and (r.i2 or 0.0) > 0.01:
+            sqrt3 = math.sqrt(3.0)
+            if (r.v12 or 0.0) > 0 and (r.v23 or 0.0) > 0 and (r.v31 or 0.0) > 0:
+                v1n = (r.v12 + r.v31) / (2.0 * sqrt3)
+                v2n = (r.v12 + r.v23) / (2.0 * sqrt3)
+                v3n = (r.v23 + r.v31) / (2.0 * sqrt3)
+            elif (r.v1n or 0.0) > 0 and (r.v2n or 0.0) > 0 and (r.v3n or 0.0) > 0:
+                v1n, v2n, v3n = r.v1n, r.v2n, r.v3n
+            else:
+                v1n = v2n = v3n = 1.0
+
+            w1 = v1n * max(r.i1 or 0.0, 0.0)
+            w2 = v2n * max(r.i2 or 0.0, 0.0)
+            w3 = v3n * max(r.i3 or 0.0, 0.0)
+            w_sum = w1 + w2 + w3
+            if w_sum > 0:
+                f1, f2 = w1 / w_sum, w2 / w_sum
+            else:
+                f1 = f2 = 1.0 / 3.0
+            p1 = round(t_kw * f1, 2)
+            p2 = round(t_kw * f2, 2)
+            p3 = round(t_kw - p1 - p2, 2)
+            return p1, p2, p3
+        return kw1, kw2, kw3
+
     def _bucket_readings(self, readings: List[Reading], interval_s: int, start: datetime, end: datetime) -> Dict[int, List[Dict[str, Any]]]:
         """Group readings into regular timestamp buckets with missing intervals represented."""
         start_aligned = (int(start.timestamp()) // interval_s) * interval_s
@@ -606,8 +646,9 @@ class QueryService:
                 v12_val = r.v12 if r.v12 is not None else (r.v1n * 1.732 if r.v1n is not None else None)
                 v23_val = r.v23 if r.v23 is not None else (r.v2n * 1.732 if r.v2n is not None else None)
                 v31_val = r.v31 if r.v31 is not None else (r.v3n * 1.732 if r.v3n is not None else None)
+                kw1_val, kw2_val, kw3_val = self._resolve_phase_powers(r)
                 buckets[b_key].append({
-                    "t_kw": r.t_kw, "kw1": r.kw1, "kw2": r.kw2, "kw3": r.kw3,
+                    "t_kw": r.t_kw, "kw1": kw1_val, "kw2": kw2_val, "kw3": kw3_val,
                     "vln_avg": r.vln_avg, "v1n": r.v1n, "v2n": r.v2n, "v3n": r.v3n,
                     "vll_avg": vll, "v12": v12_val, "v23": v23_val, "v31": v31_val,
                     "i_avg": r.i_avg, "i1": r.i1, "i2": r.i2, "i3": r.i3,

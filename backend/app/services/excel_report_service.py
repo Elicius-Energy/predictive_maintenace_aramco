@@ -32,21 +32,35 @@ def _json_safe(value: Any) -> Any:
         return [_json_safe(item) for item in value]
     return value
 
-def _to_ist_str(dt_or_iso: Any) -> str:
+def _to_ist_dt(dt_or_iso: Any) -> Optional[datetime]:
     if not dt_or_iso:
-        return ""
+        return None
     if isinstance(dt_or_iso, str):
         try:
             dt = datetime.fromisoformat(dt_or_iso.replace("Z", "+00:00"))
         except Exception:
-            return dt_or_iso
+            return None
     elif isinstance(dt_or_iso, datetime):
         dt = dt_or_iso
     else:
-        return str(dt_or_iso)
+        return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(IST).strftime("%Y-%m-%d %H:%M:%S")
+    return dt.astimezone(IST)
+
+
+def _to_ist_str(dt_or_iso: Any) -> str:
+    ist_dt = _to_ist_dt(dt_or_iso)
+    if ist_dt is None:
+        return str(dt_or_iso) if dt_or_iso else ""
+    return ist_dt.strftime("%d-%b-%Y %H:%M:%S")
+
+
+def _to_ist_date_time(dt_or_iso: Any) -> Tuple[str, str]:
+    ist_dt = _to_ist_dt(dt_or_iso)
+    if ist_dt is None:
+        return (str(dt_or_iso) if dt_or_iso else "", "")
+    return ist_dt.strftime("%d-%b-%Y"), ist_dt.strftime("%H:%M:%S")
 
 
 # ── IEC 60034-30-1 Standard Motor Efficiencies (50 Hz, 4-pole) ────────────────
@@ -198,25 +212,25 @@ class ExcelReportService:
         })
         fmt_header = workbook.add_format({
             "bold": True, "font_size": 10, "bg_color": "#E2E8F0",
-            "border": 1, "border_color": BORDER_COLOR, "align": "center", "valign": "vcenter"
+            "border": 1, "border_color": BORDER_COLOR, "align": "left", "valign": "vcenter"
         })
         fmt_cell = workbook.add_format({
-            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "valign": "vcenter"
+            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "align": "left", "valign": "vcenter"
         })
         fmt_cell_bold = workbook.add_format({
-            "bold": True, "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "valign": "vcenter"
+            "bold": True, "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "align": "left", "valign": "vcenter"
         })
         fmt_num = workbook.add_format({
-            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "num_format": "#,##0.00", "align": "right", "valign": "vcenter"
+            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "num_format": "#,##0.00", "align": "left", "valign": "vcenter"
         })
         fmt_num_int = workbook.add_format({
-            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "num_format": "#,##0", "align": "right", "valign": "vcenter"
+            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "num_format": "#,##0", "align": "left", "valign": "vcenter"
         })
         fmt_pct = workbook.add_format({
-            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "num_format": "0.0%", "align": "right", "valign": "vcenter"
+            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "num_format": "0.0%", "align": "left", "valign": "vcenter"
         })
         fmt_datetime = workbook.add_format({
-            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "num_format": "yyyy-mm-dd hh:mm:ss", "align": "center", "valign": "vcenter"
+            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "num_format": "yyyy-mm-dd hh:mm:ss", "align": "left", "valign": "vcenter"
         })
 
         # ── SHEET 1: Energy Reading Report (Client Template) ─────────────
@@ -397,9 +411,13 @@ class ExcelReportService:
         ws.write(row, 3, "Minimum", f_hdr); ws.write(row, 4, "Maximum / Total", f_hdr)
         row += 1
 
+        start_date_str, start_time_str = _to_ist_date_time(summary.get("start_time", ""))
+        end_date_str, end_time_str = _to_ist_date_time(summary.get("end_time", ""))
         measured = [
-            ("Start Time (IST)", _to_ist_str(summary.get("start_time", "")), "-", "-"),
-            ("End Time (IST)", _to_ist_str(summary.get("end_time", "")), "-", "-"),
+            ("Start Date (IST)", start_date_str, "-", "-"),
+            ("Start Time (IST)", start_time_str, "-", "-"),
+            ("End Date (IST)", end_date_str, "-", "-"),
+            ("End Time (IST)", end_time_str, "-", "-"),
             ("Analysis Period", summary.get("duration_str", ""), "-", "-"),
             ("Idle Time", summary.get("idle_time_str", ""), "-", "-"),
             ("Energy Consumption (kWh)", f"{summary.get('energy_kwh', 0.0):.2f}" if summary.get("samples_count", 0) else "Not available", "-", "-"),
@@ -778,15 +796,15 @@ class ExcelReportService:
         })
         f_summary_label = wb.add_format({
             "bold": True, "font_size": 10, "bg_color": "#E2E8F0",
-            "border": 1, "border_color": "#CBD5E1", "valign": "vcenter", "text_wrap": True
+            "border": 1, "border_color": "#CBD5E1", "align": "left", "valign": "vcenter", "text_wrap": True
         })
         f_summary_value = wb.add_format({
             "font_size": 10, "border": 1, "border_color": "#CBD5E1",
-            "valign": "vcenter", "text_wrap": True, "num_format": "#,##0.00"
+            "align": "left", "valign": "vcenter", "text_wrap": True, "num_format": "#,##0.00"
         })
         f_summary_text = wb.add_format({
             "font_size": 10, "border": 1, "border_color": "#CBD5E1",
-            "valign": "top", "text_wrap": True
+            "align": "left", "valign": "top", "text_wrap": True
         })
 
         ws.hide_gridlines(2)
@@ -930,7 +948,7 @@ class ExcelReportService:
 
     def _write_sheet4_data(self, ws, points, f_hdr, f_cell, f_num, f_dt):
         headers = [
-            "Timestamp (IST)", "Interval kWh", "Cumulative kWh", "Power (kW)",
+            "Date (IST)", "Time (IST)", "Interval kWh", "Cumulative kWh", "Power (kW)",
             "kW L1", "kW L2", "kW L3", "Voltage L-L Avg (V)", "V12", "V23", "V31",
             "Current Avg (A)", "I L1", "I L2", "I L3", "PF Avg", "PF L1", "PF L2", "PF L3", "Frequency (Hz)",
             "Temperature (°C)", "Speed (RPM)"
@@ -939,47 +957,47 @@ class ExcelReportService:
             ws.write(0, col, h, f_hdr)
             ws.set_column(col, col, 14)
 
-        last_row = 0
         for row, pt in enumerate(points, start=1):
-            last_row = row
-            ws.write(row, 0, _to_ist_str(pt.get("ts", "")), f_cell)
-            ws.write(row, 1, pt["kwh"] if pt["kwh"] is not None else "", f_num)
-            ws.write(row, 2, pt["cum_kwh"] if pt["cum_kwh"] is not None else "", f_num)
-            ws.write(row, 3, pt["kw"] if pt["kw"] is not None else "", f_num)
-            ws.write(row, 4, pt["kw1"] if pt["kw1"] is not None else "", f_num)
-            ws.write(row, 5, pt["kw2"] if pt["kw2"] is not None else "", f_num)
-            ws.write(row, 6, pt["kw3"] if pt["kw3"] is not None else "", f_num)
+            date_str, time_str = _to_ist_date_time(pt.get("ts", ""))
+            ws.write(row, 0, date_str, f_cell)
+            ws.write(row, 1, time_str, f_cell)
+            ws.write(row, 2, pt["kwh"] if pt["kwh"] is not None else "", f_num)
+            ws.write(row, 3, pt["cum_kwh"] if pt["cum_kwh"] is not None else "", f_num)
+            ws.write(row, 4, pt["kw"] if pt["kw"] is not None else "", f_num)
+            ws.write(row, 5, pt["kw1"] if pt["kw1"] is not None else "", f_num)
+            ws.write(row, 6, pt["kw2"] if pt["kw2"] is not None else "", f_num)
+            ws.write(row, 7, pt["kw3"] if pt["kw3"] is not None else "", f_num)
             vll = pt.get("vll_avg") if pt.get("vll_avg") is not None else pt.get("v_avg")
-            ws.write(row, 7, vll if vll is not None else "", f_num)
+            ws.write(row, 8, vll if vll is not None else "", f_num)
             v12 = pt.get("v12") if pt.get("v12") is not None else (round(pt["v1n"] * 1.732, 1) if pt.get("v1n") is not None else "")
             v23 = pt.get("v23") if pt.get("v23") is not None else (round(pt["v2n"] * 1.732, 1) if pt.get("v2n") is not None else "")
             v31 = pt.get("v31") if pt.get("v31") is not None else (round(pt["v3n"] * 1.732, 1) if pt.get("v3n") is not None else "")
-            ws.write(row, 8, v12, f_num if isinstance(v12, (int, float)) else f_cell)
-            ws.write(row, 9, v23, f_num if isinstance(v23, (int, float)) else f_cell)
-            ws.write(row, 10, v31, f_num if isinstance(v31, (int, float)) else f_cell)
-            ws.write(row, 11, pt["i_avg"] if pt["i_avg"] is not None else "", f_num)
-            ws.write(row, 12, pt["i1"] if pt["i1"] is not None else "", f_num)
-            ws.write(row, 13, pt["i2"] if pt["i2"] is not None else "", f_num)
-            ws.write(row, 14, pt["i3"] if pt["i3"] is not None else "", f_num)
-            ws.write(row, 15, pt["pf_avg"] if pt["pf_avg"] is not None else "", f_num)
-            ws.write(row, 16, pt["pf1"] if pt["pf1"] is not None else "", f_num)
-            ws.write(row, 17, pt["pf2"] if pt["pf2"] is not None else "", f_num)
-            ws.write(row, 18, pt["pf3"] if pt["pf3"] is not None else "", f_num)
-            ws.write(row, 19, pt["freq"] if pt["freq"] is not None else "", f_num)
+            ws.write(row, 9, v12, f_num if isinstance(v12, (int, float)) else f_cell)
+            ws.write(row, 10, v23, f_num if isinstance(v23, (int, float)) else f_cell)
+            ws.write(row, 11, v31, f_num if isinstance(v31, (int, float)) else f_cell)
+            ws.write(row, 12, pt["i_avg"] if pt["i_avg"] is not None else "", f_num)
+            ws.write(row, 13, pt["i1"] if pt["i1"] is not None else "", f_num)
+            ws.write(row, 14, pt["i2"] if pt["i2"] is not None else "", f_num)
+            ws.write(row, 15, pt["i3"] if pt["i3"] is not None else "", f_num)
+            ws.write(row, 16, pt["pf_avg"] if pt["pf_avg"] is not None else "", f_num)
+            ws.write(row, 17, pt["pf1"] if pt["pf1"] is not None else "", f_num)
+            ws.write(row, 18, pt["pf2"] if pt["pf2"] is not None else "", f_num)
+            ws.write(row, 19, pt["pf3"] if pt["pf3"] is not None else "", f_num)
+            ws.write(row, 20, pt["freq"] if pt["freq"] is not None else "", f_num)
             temp_val = pt.get("temperature")
             rpm_val = pt.get("rpm")
-            ws.write(row, 20, temp_val if temp_val is not None else "", f_num if temp_val is not None else f_cell)
-            ws.write(row, 21, int(rpm_val) if rpm_val is not None else "", f_num if rpm_val is not None else f_cell)
+            ws.write(row, 21, temp_val if temp_val is not None else "", f_num if temp_val is not None else f_cell)
+            ws.write(row, 22, int(rpm_val) if rpm_val is not None else "", f_num if rpm_val is not None else f_cell)
 
     def _write_sheet_data_summary(self, ws, points, f_hdr, f_cell, f_num, f_bold):
         """Writes the 8-checkpoint shift audit summary sheet ('Data Summery sheet')."""
         ws.set_column(0, 0, 8)    # Sr no
-        ws.set_column(1, 1, 24)   # Timestamp
-        ws.set_column(2, 7, 16)   # Power, kWh, VLL, I, PF, Freq
-        ws.set_column(8, 8, 32)   # Remarks
+        ws.set_column(1, 2, 16)   # Date (IST), Time (IST)
+        ws.set_column(3, 8, 16)   # Power, kWh, VLL, I, PF, Freq
+        ws.set_column(9, 9, 32)   # Remarks
 
         ckpt_headers = [
-            "Sr no", "Timestamp (IST)", "Power (kW)", "Cumulative kWh",
+            "Sr no", "Date (IST)", "Time (IST)", "Power (kW)", "Cumulative kWh",
             "Voltage L-L Avg (V)", "Current Avg (A)", "PF Avg", "Frequency (Hz)", "Remarks"
         ]
         for c, h in enumerate(ckpt_headers):
@@ -1013,13 +1031,15 @@ class ExcelReportService:
             if sr - 1 < len(checkpoints):
                 c_pt = checkpoints[sr - 1]
                 vll = c_pt.get("vll_avg") if c_pt.get("vll_avg") is not None else c_pt.get("v_avg")
-                ws.write(r_idx, 1, _to_ist_str(c_pt.get("ts", "")), f_cell)
-                ws.write(r_idx, 2, c_pt.get("kw") if c_pt.get("kw") is not None else "", f_num if c_pt.get("kw") is not None else f_cell)
-                ws.write(r_idx, 3, c_pt.get("cum_kwh") if c_pt.get("cum_kwh") is not None else "", f_num if c_pt.get("cum_kwh") is not None else f_cell)
-                ws.write(r_idx, 4, vll if vll is not None else "", f_num if vll is not None else f_cell)
-                ws.write(r_idx, 5, c_pt.get("i_avg") if c_pt.get("i_avg") is not None else "", f_num if c_pt.get("i_avg") is not None else f_cell)
-                ws.write(r_idx, 6, c_pt.get("pf_avg") if c_pt.get("pf_avg") is not None else "", f_num if c_pt.get("pf_avg") is not None else f_cell)
-                ws.write(r_idx, 7, c_pt.get("freq") if c_pt.get("freq") is not None else "", f_num if c_pt.get("freq") is not None else f_cell)
+                c_date, c_time = _to_ist_date_time(c_pt.get("ts", ""))
+                ws.write(r_idx, 1, c_date, f_cell)
+                ws.write(r_idx, 2, c_time, f_cell)
+                ws.write(r_idx, 3, c_pt.get("kw") if c_pt.get("kw") is not None else "", f_num if c_pt.get("kw") is not None else f_cell)
+                ws.write(r_idx, 4, c_pt.get("cum_kwh") if c_pt.get("cum_kwh") is not None else "", f_num if c_pt.get("cum_kwh") is not None else f_cell)
+                ws.write(r_idx, 5, vll if vll is not None else "", f_num if vll is not None else f_cell)
+                ws.write(r_idx, 6, c_pt.get("i_avg") if c_pt.get("i_avg") is not None else "", f_num if c_pt.get("i_avg") is not None else f_cell)
+                ws.write(r_idx, 7, c_pt.get("pf_avg") if c_pt.get("pf_avg") is not None else "", f_num if c_pt.get("pf_avg") is not None else f_cell)
+                ws.write(r_idx, 8, c_pt.get("freq") if c_pt.get("freq") is not None else "", f_num if c_pt.get("freq") is not None else f_cell)
 
                 remarks_str = "Opening reading" if sr == 1 else ""
                 t_val = c_pt.get("temperature")
@@ -1033,7 +1053,7 @@ class ExcelReportService:
                     m_str = ", ".join(meas)
                     remarks_str = f"{remarks_str} ({m_str})" if remarks_str else m_str
 
-                ws.write(r_idx, 8, remarks_str, f_cell)
+                ws.write(r_idx, 9, remarks_str, f_cell)
             else:
                 for c in range(1, len(ckpt_headers)):
                     ws.write(r_idx, c, "", f_cell)
@@ -1046,22 +1066,22 @@ class ExcelReportService:
         chart_kw = wb.add_chart({"type": "line"})
         chart_kw.add_series({
             "name": "Total Power (kW)",
-            "categories": f"=Data!$A$2:$A${num_pts+1}",
-            "values": f"=Data!$D$2:$D${num_pts+1}",
+            "categories": f"=Data!$A$2:$B${num_pts+1}",
+            "values": f"=Data!$E$2:$E${num_pts+1}",
             "line": {"color": "#1F3A8A", "width": 2}
         })
         chart_kw.set_title({"name": "Active Power (kW) Trend"})
-        chart_kw.set_x_axis({"name": "Time"})
+        chart_kw.set_x_axis({"name": "Date / Time"})
         chart_kw.set_y_axis({"name": "kW"})
         chart_kw.set_size({"width": 600, "height": 320})
         ws.insert_chart("B2", chart_kw)
 
         # Chart 2: Current (3 Phases) Trend
         chart_i = wb.add_chart({"type": "line"})
-        for name, col_letter, color in [("I L1", "M", "#EF4444"), ("I L2", "N", "#F59E0B"), ("I L3", "O", "#3B82F6")]:
+        for name, col_letter, color in [("I L1", "N", "#EF4444"), ("I L2", "O", "#F59E0B"), ("I L3", "P", "#3B82F6")]:
             chart_i.add_series({
                 "name": name,
-                "categories": f"=Data!$A$2:$A${num_pts+1}",
+                "categories": f"=Data!$A$2:$B${num_pts+1}",
                 "values": f"=Data!${col_letter}$2:${col_letter}${num_pts+1}",
                 "line": {"color": color, "width": 1.5}
             })
@@ -1071,10 +1091,10 @@ class ExcelReportService:
 
         # Chart 3: Line-to-Line Voltage Trend
         chart_v = wb.add_chart({"type": "line"})
-        for name, col_letter, color in [("V12", "I", "#EF4444"), ("V23", "J", "#F59E0B"), ("V31", "K", "#3B82F6")]:
+        for name, col_letter, color in [("V12", "J", "#EF4444"), ("V23", "K", "#F59E0B"), ("V31", "L", "#3B82F6")]:
             chart_v.add_series({
                 "name": name,
-                "categories": f"=Data!$A$2:$A${num_pts+1}",
+                "categories": f"=Data!$A$2:$B${num_pts+1}",
                 "values": f"=Data!${col_letter}$2:${col_letter}${num_pts+1}",
                 "line": {"color": color, "width": 1.5}
             })
@@ -1086,8 +1106,8 @@ class ExcelReportService:
         chart_pf = wb.add_chart({"type": "line"})
         chart_pf.add_series({
             "name": "Power Factor",
-            "categories": f"=Data!$A$2:$A${num_pts+1}",
-            "values": f"=Data!$P$2:$P${num_pts+1}",
+            "categories": f"=Data!$A$2:$B${num_pts+1}",
+            "values": f"=Data!$Q$2:$Q${num_pts+1}",
             "line": {"color": "#10B981", "width": 2}
         })
         chart_pf.set_title({"name": "Power Factor Trend"})

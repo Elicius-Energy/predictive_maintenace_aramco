@@ -52,6 +52,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Database initialization failed: %s", str(e), exc_info=True)
 
+    # 1b. Clear alerts from retired rule types (e.g. old sensor "communication failure")
+    try:
+        _db = SessionLocal()
+        try:
+            fault_engine.clear_retired_alerts(_db)
+            _db.commit()
+        finally:
+            _db.close()
+    except Exception as e:
+        logger.error("Retired alert cleanup failed: %s", str(e))
+
     # 2. Start background watchdog job
     scheduler.add_job(run_watchdog_job, "interval", seconds=30, id="comm_watchdog", replace_existing=True)
     scheduler.start()

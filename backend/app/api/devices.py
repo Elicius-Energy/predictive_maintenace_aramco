@@ -56,6 +56,7 @@ class ProfileUpdateRequest(BaseModel):
     machine_rpm_max: Optional[float] = None
     machine_rpm_avg: Optional[float] = None
     no_of_spindles: Optional[int] = None
+    doff_time_min: Optional[float] = None
     inverter_make: Optional[str] = None
     inverter_model: Optional[str] = None
     rep_name: Optional[str] = None
@@ -84,16 +85,19 @@ class DeviceRegisterRequest(BaseModel):
 @router.get("", response_model=List[DeviceResponse])
 def list_devices(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """List all registered devices with their current health status."""
+    from app.services.fault_engine import fault_engine
+    now_utc = datetime.now(timezone.utc)
     devices = db.query(Device).all() if user.role.lower() == "admin" else db.query(Device).join(UserDeviceAccess).filter(UserDeviceAccess.user_id == user.id).all()
     res = []
     for d in devices:
+        effective_status = fault_engine.heal_live_device_status(d, db, now_utc)
         res.append(DeviceResponse(
             device_id=d.device_id,
             alias=d.alias or d.device_id,
             fw_ver=d.fw_ver,
             first_seen=d.first_seen.isoformat() if d.first_seen else None,
             last_seen=d.last_seen.isoformat() if d.last_seen else None,
-            status=d.status,
+            status=effective_status,
             status_detail=d.status_detail or {},
             configured=d.configured
         ))
@@ -221,6 +225,7 @@ def get_device_profile(device_id: str, db: Session = Depends(get_db), user: User
         "machine_rpm_max": profile.machine_rpm_max,
         "machine_rpm_avg": profile.machine_rpm_avg,
         "no_of_spindles": profile.no_of_spindles,
+        "doff_time_min": profile.doff_time_min,
         "inverter_make": profile.inverter_make,
         "inverter_model": profile.inverter_model,
         "rep_name": profile.rep_name,
@@ -438,6 +443,7 @@ def acknowledge_alert(
                 for k in ["ct_l1", "ct_l2", "ct_l3", "vclip_l1", "vclip_l2", "vclip_l3"]:
                     chips[k] = "Normal"
                     chips[f"{k}_detail"] = "Normal"
+                    chips[f"{k}_label"] = "Normal"
                 dev.status_detail = chips
 
     db.commit()

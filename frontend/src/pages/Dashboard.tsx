@@ -211,22 +211,72 @@ export const Dashboard: React.FC = () => {
     );
   };
 
-  // Trend chart filters
-  const [analysisPreset, setAnalysisPreset] = useState<'1h' | '8h' | '24h' | '7d' | 'custom'>('1h');
-  const [startDate, setStartDate] = useState(() => getIstDateAndTime(new Date(Date.now() - 1 * 3600 * 1000)).date);
-  const [startTime, setStartTime] = useState(() => getIstDateAndTime(new Date(Date.now() - 1 * 3600 * 1000)).time);
-  const [endDate, setEndDate] = useState(() => getIstDateAndTime(new Date()).date);
-  const [endTime, setEndTime] = useState(() => getIstDateAndTime(new Date()).time);
+  // Trend chart filters (persisted across tab switches and page reloads until logout)
+  const loadSavedPeriod = () => {
+    try {
+      const raw = localStorage.getItem('elicius_dashboard_period');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.startDate && parsed.startTime && parsed.endDate && parsed.endTime) {
+          return parsed;
+        }
+      }
+    } catch {
+      // Ignore storage errors
+    }
+    const sFmt = getIstDateAndTime(new Date(Date.now() - 1 * 3600 * 1000));
+    const eFmt = getIstDateAndTime(new Date());
+    return {
+      preset: '1h' as const,
+      startDate: sFmt.date,
+      startTime: sFmt.time,
+      endDate: eFmt.date,
+      endTime: eFmt.time,
+      interval: '1-minute' as const,
+    };
+  };
 
-  const [interval, setIntervalVal] = useState<'1-minute' | '5-minute' | '1-hour'>('1-minute');
-  // Default active trend charts: open Current, Active Power, and Voltage by default
-  const [activeParams, setActiveParams] = useState<Record<string, boolean>>({
-    kw: true,
-    current: true,
-    voltage: true,
-    kwh: false,
-    pf: false,
-    freq: false,
+  const [analysisPreset, setAnalysisPreset] = useState<'1h' | '8h' | '24h' | '7d' | 'custom'>(() => loadSavedPeriod().preset || '1h');
+  const [startDate, setStartDate] = useState<string>(() => loadSavedPeriod().startDate);
+  const [startTime, setStartTime] = useState<string>(() => loadSavedPeriod().startTime);
+  const [endDate, setEndDate] = useState<string>(() => loadSavedPeriod().endDate);
+  const [endTime, setEndTime] = useState<string>(() => loadSavedPeriod().endTime);
+
+  const [interval, setIntervalVal] = useState<'1-minute' | '5-minute' | '1-hour'>(() => loadSavedPeriod().interval || '1-minute');
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        'elicius_dashboard_period',
+        JSON.stringify({ preset: analysisPreset, startDate, startTime, endDate, endTime, interval })
+      );
+    } catch {
+      // Ignore storage errors
+    }
+  }, [analysisPreset, startDate, startTime, endDate, endTime, interval]);
+
+  // Default active trend charts: only Energy (kWh) by default, persisted until logout
+  const [activeParams, setActiveParams] = useState<Record<string, boolean>>(() => {
+    const defaultParams = {
+      kwh: true,
+      kw: false,
+      current: false,
+      voltage: false,
+      pf: false,
+      freq: false,
+    };
+    try {
+      const raw = localStorage.getItem('elicius_dashboard_active_params');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          return { ...defaultParams, ...parsed };
+        }
+      }
+    } catch {
+      // Ignore storage errors
+    }
+    return defaultParams;
   });
 
   // Query results
@@ -375,7 +425,15 @@ export const Dashboard: React.FC = () => {
   };
 
   const toggleParam = (key: string) => {
-    setActiveParams((prev: Record<string, boolean>) => ({ ...prev, [key]: !prev[key] }));
+    setActiveParams((prev: Record<string, boolean>) => {
+      const updated = { ...prev, [key]: !prev[key] };
+      try {
+        localStorage.setItem('elicius_dashboard_active_params', JSON.stringify(updated));
+      } catch {
+        // Ignore storage errors
+      }
+      return updated;
+    });
   };
 
   // Session acknowledgment management:
@@ -502,8 +560,8 @@ export const Dashboard: React.FC = () => {
             </div>
           </div>
 
-          {/* Per-Phase Diagnostic Chips */}
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Per-Phase Diagnostic Chips (Single Row) */}
+          <div className="flex flex-nowrap items-center gap-1.5 overflow-x-auto max-w-full">
             {[
               { id: 'ct_l1', label: 'CT L1' },
               { id: 'ct_l2', label: 'CT L2' },
@@ -513,17 +571,23 @@ export const Dashboard: React.FC = () => {
               { id: 'vclip_l3', label: 'Clip L3' }
             ].map((chip) => {
               const chipStatus = liveData?.status_detail?.[chip.id] || 'Normal';
+              const chipLabel = liveData?.status_detail?.[`${chip.id}_label`] || (
+                chipStatus === 'Incorrect connection' && chip.id.startsWith('ct_') ? 'Reverse CT' :
+                chipStatus === 'Disconnected' && chip.id.startsWith('ct_') ? 'CT not connected' :
+                chipStatus !== 'Normal' && chip.id.startsWith('vclip_') ? 'Check clip' :
+                chipStatus
+              );
               const chipDetail = liveData?.status_detail?.[`${chip.id}_detail`];
               const chipColor = getStatusColor(chipStatus);
               return (
                 <div
                   key={chip.id}
-                  title={chipDetail || `${chip.label}: ${chipStatus}`}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border ${chipColor.border} bg-white text-xs font-semibold shadow-2xs`}
+                  title={chipDetail || `${chip.label}: ${chipLabel}`}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-lg border ${chipColor.border} bg-white text-[11px] font-semibold shadow-2xs whitespace-nowrap shrink-0`}
                 >
-                  <span className={`w-2 h-2 rounded-full ${chipColor.dot}`} />
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${chipColor.dot}`} />
                   <span className="text-slate-700">{chip.label}:</span>
-                  <span className={chipColor.text}>{chipStatus}</span>
+                  <span className={chipColor.text}>{chipLabel}</span>
                 </div>
               );
             })}
@@ -534,7 +598,15 @@ export const Dashboard: React.FC = () => {
         {/* Compact Open Alerts List with Acknowledge Button */}
         {visibleAlerts.length > 0 && (
           <div className="mt-4 pt-4 border-t border-slate-200/60 space-y-2">
-            {visibleAlerts.map((alt: any) => (
+            {visibleAlerts.map((alt: any) => {
+              const alertTitleMap: Record<string, string> = {
+                ct_polarity_incorrect: 'REVERSE CT ERROR',
+                ct_disconnected: 'CT NOT CONNECTED ERROR',
+                voltage_clip_disconnected: 'CHECK CLIP',
+                voltage_clip_imbalance: 'CHECK CLIP',
+              };
+              const alertTitle = alertTitleMap[alt.type] || alt.type.replace(/_/g, ' ').toUpperCase();
+              return (
               <div
                 key={alt.id}
                 className={`flex items-center justify-between p-2.5 bg-white/90 rounded-xl border text-xs ${
@@ -547,7 +619,7 @@ export const Dashboard: React.FC = () => {
                   ) : (
                     <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
                   )}
-                  <span className="font-bold">{alt.phase ? `[${alt.phase}] ` : ''}{alt.type.replace(/_/g, ' ').toUpperCase()}:</span>
+                  <span className="font-bold">{alt.phase ? `[${alt.phase}] ` : ''}{alertTitle}:</span>
                   <span className="text-slate-700">{alt.details?.reason || alt.details?.message || alt.severity}</span>
                   <span className="text-[11px] text-slate-400">({formatIstTimeOnly(alt.started_at)})</span>
                 </div>
@@ -560,7 +632,8 @@ export const Dashboard: React.FC = () => {
                   Acknowledge
                 </button>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -633,12 +706,12 @@ export const Dashboard: React.FC = () => {
           </div>
           <div className="flex items-baseline gap-1">
             <span className="text-2xl sm:text-3xl font-extrabold text-emerald-700 tracking-tight">
-              {liveData?.energy?.today_kwh ?? '--'}
+              {summary?.energy_kwh ?? '--'}
             </span>
             <span className="text-xs font-semibold text-slate-500">kWh</span>
           </div>
           <div className="mt-2 pt-2 border-t border-slate-100 flex justify-between text-[11px] text-slate-500 font-medium">
-            <span>Today's Energy</span>
+            <span>Selected Period</span>
             <span className="font-semibold text-slate-700">{liveData?.energy?.lifetime_kwh ?? 0} total</span>
           </div>
         </div>
