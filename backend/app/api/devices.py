@@ -615,3 +615,313 @@ def record_manual_reading(
     }
 
 
+class MachineScreenOcrRequest(BaseModel):
+    image_base64: str
+    mime_type: Optional[str] = "image/jpeg"
+    target_time: Optional[str] = None
+
+
+@router.post("/{device_id}/upload-machine-screen")
+def upload_machine_screen(
+    device_id: str,
+    payload: MachineScreenOcrRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """
+    Extract machine HMI screen parameters via OpenAI Vision in-memory (no disk storage),
+    immediately release image bytes after OCR, populate the nearest timestamp reading row
+    at the upload time, and auto-update Machine Details in the device configuration profile.
+    """
+    import gc
+    import json
+    import re
+    from openai import OpenAI
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.config import settings
+    from app.services.rag_service import build_chat_completion_kwargs
+
+    require_device_access(user, device_id, db)
+
+    if not settings.OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key is not configured on the server.")
+
+    device = db.query(Device).filter(Device.device_id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    b64_data: Optional[str] = payload.image_base64 or ""
+    if "," in b64_data and b64_data.strip().startswith("data:"):
+        b64_data = b64_data.split(",", 1)[1]
+    b64_data = b64_data.strip()
+
+    if not b64_data:
+        raise HTTPException(status_code=400, detail="Empty image payload.")
+    if len(b64_data) > 10 * 1024 * 1024:
+        b64_data = None
+        gc.collect()
+        raise HTTPException(status_code=413, detail="Image is too large. Please upload an image under 6 MB.")
+
+    mime = payload.mime_type or "image/jpeg"
+    ocr_json: Dict[str, Any] = {}
+
+    try:
+        client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are an industrial textile machine HMI OCR assistant. Extract the displayed values from the machine screen image into strict JSON. "
+                    "Rules:\n"
+                    "1. Never guess or hallucinate unreadable numbers. If a value is blurry, obscured by glare, cut off, or unreadable, set it to null and add its human-readable field name to 'unclear_fields'.\n"
+                    "2. If the image is not a machine screen or is too blurry/dark to read core values, set 'is_readable' to false and explain why in 'reason'.\n"
+                    "3. Return ONLY valid JSON with these exact keys:\n"
+                    "{\n"
+                    '  "is_readable": true,\n'
+                    '  "confidence": "high",\n'
+                    '  "unclear_fields": [],\n'
+                    '  "reason": "",\n'
+                    '  "machine_make": "string or null (e.g. LMW)",\n'
+                    '  "machine_name": "string or null (e.g. RINGFRAME)",\n'
+                    '  "machine_model_no": "string or null (e.g. LRJ 60A - M)",\n'
+                    '  "shift": "string or null (e.g. Shift - 1)",\n'
+                    '  "screen_date": "string or null (e.g. 31/10/2026)",\n'
+                    '  "screen_time": "string or null (e.g. 08:35:37)",\n'
+                    '  "count_ne": "number or null (value next to Ne)",\n'
+                    '  "spindle_rpm": "number or null (high rpm value, typically 5000-25000 rpm)",\n'
+                    '  "chase_mm": "number or null (value next to mm)",\n'
+                    '  "length_m": "number or null (value next to M)",\n'
+                    '  "doff_time_min": "number or null (value next to min)",\n'
+                    '  "front_roller_rpm": "number or null (lower rpm value, typically 50-500 rpm)",\n'
+                    '  "tpi": "number or null (value next to TPI)",\n'
+                    '  "delivery_speed_m_min": "number or null (value next to m/min)",\n'
+                    '  "efficiency_pct": "number or null (value next to %)",\n'
+                    '  "suction_pressure_mm_wc": "number or null (value next to mm WC)",\n'
+                    '  "machine_status": "string or null (e.g. Machine ON)"\n'
+                    "}"
+                )
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Extract all readings from this machine HMI screen image as JSON."},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_data}", "detail": "high"}}
+                ]
+            }
+        ]
+        kwargs = build_chat_completion_kwargs(settings.OPENAI_CHAT_MODEL, messages, max_tokens=700, temperature=0.0)
+        resp = client.chat.completions.create(**kwargs)
+        raw_text = (resp.choices[0].message.content or "").strip()
+        if raw_text.startswith("```"):
+            raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
+            raw_text = re.sub(r"\s*```$", "", raw_text)
+        ocr_json = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return {
+            "success": False,
+            "needs_reupload": True,
+            "reason": "Could not parse clear machine screen readings from the uploaded image. Please re-upload a clearer photo of the machine screen.",
+            "unclear_fields": [],
+            "extracted": {}
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"OpenAI Vision OCR failed: {exc}")
+    finally:
+        # Immediately free image memory; never persist image bytes to disk or DB
+        b64_data = None
+        payload.image_base64 = ""
+        gc.collect()
+
+    def _clean_float(val: Any) -> Optional[float]:
+        if val is None or val == "":
+            return None
+        try:
+            f = float(val)
+            return round(f, 2)
+        except (ValueError, TypeError):
+            return None
+
+    def _clean_str(val: Any) -> Optional[str]:
+        if val is None:
+            return None
+        s = str(val).strip()
+        return s if s and s.lower() != "null" else None
+
+    is_readable = bool(ocr_json.get("is_readable", True))
+    confidence = str(ocr_json.get("confidence", "high")).lower()
+    unclear_raw = ocr_json.get("unclear_fields") or []
+    unclear_fields = [str(u).strip() for u in unclear_raw if str(u).strip()]
+    reason = _clean_str(ocr_json.get("reason")) or ""
+
+    screen_record: Dict[str, Any] = {
+        "machine_make": _clean_str(ocr_json.get("machine_make")),
+        "machine_name": _clean_str(ocr_json.get("machine_name")),
+        "machine_model_no": _clean_str(ocr_json.get("machine_model_no")),
+        "shift": _clean_str(ocr_json.get("shift")),
+        "screen_date": _clean_str(ocr_json.get("screen_date")),
+        "screen_time": _clean_str(ocr_json.get("screen_time")),
+        "count_ne": _clean_float(ocr_json.get("count_ne")),
+        "spindle_rpm": _clean_float(ocr_json.get("spindle_rpm")),
+        "chase_mm": _clean_float(ocr_json.get("chase_mm")),
+        "length_m": _clean_float(ocr_json.get("length_m")),
+        "doff_time_min": _clean_float(ocr_json.get("doff_time_min")),
+        "front_roller_rpm": _clean_float(ocr_json.get("front_roller_rpm")),
+        "tpi": _clean_float(ocr_json.get("tpi")),
+        "delivery_speed_m_min": _clean_float(ocr_json.get("delivery_speed_m_min")),
+        "efficiency_pct": _clean_float(ocr_json.get("efficiency_pct")),
+        "suction_pressure_mm_wc": _clean_float(ocr_json.get("suction_pressure_mm_wc")),
+        "machine_status": _clean_str(ocr_json.get("machine_status")),
+    }
+
+    # Ensure any field explicitly flagged as unclear is kept None (empty)
+    unclear_norm = {u.lower().replace(" ", "_") for u in unclear_fields}
+    for k in list(screen_record.keys()):
+        if k in unclear_norm:
+            screen_record[k] = None
+
+    numeric_keys = [
+        "count_ne", "spindle_rpm", "chase_mm", "length_m", "doff_time_min",
+        "front_roller_rpm", "tpi", "delivery_speed_m_min", "efficiency_pct", "suction_pressure_mm_wc"
+    ]
+    extracted_numeric_count = sum(1 for k in numeric_keys if screen_record.get(k) is not None)
+    extracted_any_count = sum(1 for v in screen_record.values() if v is not None)
+
+    if not is_readable or (extracted_numeric_count == 0 and extracted_any_count == 0):
+        return {
+            "success": False,
+            "needs_reupload": True,
+            "reason": reason or "The uploaded image is unclear or does not show a readable machine screen. Please upload a clearer photo.",
+            "unclear_fields": unclear_fields,
+            "extracted": {}
+        }
+
+    # 1. Auto-populate Machine Details in DeviceProfile (Configuration & Report)
+    profile = device.profile
+    if not profile:
+        profile = DeviceProfile(device_id=device_id)
+        db.add(profile)
+
+    updated_profile_fields: Dict[str, Any] = {}
+    if screen_record["machine_make"]:
+        profile.machine_make = screen_record["machine_make"]
+        updated_profile_fields["machine_make"] = profile.machine_make
+    if screen_record["machine_name"]:
+        profile.machine_name = screen_record["machine_name"]
+        updated_profile_fields["machine_name"] = profile.machine_name
+    if screen_record["machine_model_no"]:
+        profile.machine_model_no = screen_record["machine_model_no"]
+        updated_profile_fields["machine_model_no"] = profile.machine_model_no
+    if screen_record["count_ne"] is not None:
+        c_val = screen_record["count_ne"]
+        c_str = f"{int(c_val)}s Ne" if float(c_val).is_integer() else f"{c_val} Ne"
+        profile.machine_count = c_str
+        updated_profile_fields["machine_count"] = profile.machine_count
+    if screen_record["tpi"] is not None:
+        profile.machine_tpi = str(screen_record["tpi"])
+        updated_profile_fields["machine_tpi"] = profile.machine_tpi
+    if screen_record["spindle_rpm"] is not None:
+        s_rpm = float(screen_record["spindle_rpm"])
+        profile.machine_rpm_avg = s_rpm
+        updated_profile_fields["machine_rpm_avg"] = s_rpm
+        if profile.machine_rpm_max is None or s_rpm > profile.machine_rpm_max:
+            profile.machine_rpm_max = s_rpm
+            updated_profile_fields["machine_rpm_max"] = s_rpm
+    if screen_record["doff_time_min"] is not None:
+        profile.doff_time_min = float(screen_record["doff_time_min"])
+        updated_profile_fields["doff_time_min"] = profile.doff_time_min
+
+    # 2. Match upload timestamp to nearest Reading row and attach screen_record ONLY to that row
+    upload_dt = datetime.now(timezone.utc)
+    if payload.target_time:
+        try:
+            t_str = payload.target_time.replace(" ", "+").replace("Z", "+00:00")
+            parsed_dt = datetime.fromisoformat(t_str)
+            if parsed_dt.tzinfo is None:
+                parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
+            upload_dt = parsed_dt
+        except Exception:
+            upload_dt = datetime.now(timezone.utc)
+
+    reading_before = (
+        db.query(Reading)
+        .filter(Reading.device_id == device_id, Reading.ts <= upload_dt)
+        .order_by(Reading.ts.desc())
+        .first()
+    )
+    reading_after = (
+        db.query(Reading)
+        .filter(Reading.device_id == device_id, Reading.ts >= upload_dt)
+        .order_by(Reading.ts.asc())
+        .first()
+    )
+
+    nearest: Optional[Reading] = None
+    if reading_before and reading_after:
+        t_before = reading_before.ts if reading_before.ts.tzinfo else reading_before.ts.replace(tzinfo=timezone.utc)
+        t_after = reading_after.ts if reading_after.ts.tzinfo else reading_after.ts.replace(tzinfo=timezone.utc)
+        dt_before = abs((upload_dt - t_before).total_seconds())
+        dt_after = abs((t_after - upload_dt).total_seconds())
+        nearest = reading_before if dt_before <= dt_after else reading_after
+    elif reading_before:
+        nearest = reading_before
+    elif reading_after:
+        nearest = reading_after
+    else:
+        nearest = (
+            db.query(Reading)
+            .filter(Reading.device_id == device_id)
+            .order_by(Reading.ts.desc())
+            .first()
+        )
+
+    matched_iso = None
+    ist_str = None
+    screen_record["uploaded_at"] = upload_dt.isoformat()
+
+    if nearest:
+        raw_copy = dict(nearest.raw) if isinstance(nearest.raw, dict) else {}
+        raw_copy["machine_screen"] = screen_record
+        nearest.raw = raw_copy
+        flag_modified(nearest, "raw")
+        ts_aware = nearest.ts if nearest.ts.tzinfo else nearest.ts.replace(tzinfo=timezone.utc)
+        matched_iso = ts_aware.isoformat()
+        ist_offset = timezone(timedelta(hours=5, minutes=30))
+        ist_str = ts_aware.astimezone(ist_offset).strftime("%d-%b-%Y %I:%M:%S %p IST")
+
+    db.commit()
+
+    needs_reupload = len(unclear_fields) > 0 or confidence == "low"
+    summary_parts = []
+    if screen_record.get("machine_make") or screen_record.get("machine_model_no"):
+        summary_parts.append(" ".join(filter(None, [screen_record.get("machine_make"), screen_record.get("machine_name"), screen_record.get("machine_model_no")])))
+    if screen_record.get("count_ne") is not None:
+        summary_parts.append(f"{screen_record['count_ne']} Ne")
+    if screen_record.get("spindle_rpm") is not None:
+        summary_parts.append(f"{int(screen_record['spindle_rpm'])} RPM")
+    if screen_record.get("tpi") is not None:
+        summary_parts.append(f"TPI {screen_record['tpi']}")
+    if screen_record.get("doff_time_min") is not None:
+        summary_parts.append(f"Doff {int(screen_record['doff_time_min'])} min")
+
+    msg = f"Extracted machine screen data ({', '.join(summary_parts)})"
+    if ist_str:
+        msg += f" and recorded onto row at {ist_str}."
+    else:
+        msg += " and updated Machine Details configuration."
+
+    return {
+        "success": True,
+        "partial": len(unclear_fields) > 0,
+        "needs_reupload": needs_reupload,
+        "confidence": confidence,
+        "unclear_fields": unclear_fields,
+        "reason": reason,
+        "device_id": device_id,
+        "matched_timestamp": matched_iso,
+        "matched_timestamp_ist": ist_str,
+        "extracted": screen_record,
+        "profile_updated": updated_profile_fields,
+        "message": msg
+    }
+
+

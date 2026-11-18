@@ -86,7 +86,7 @@ export const Navbar: React.FC = () => {
               }
             >
               <FileSpreadsheet className="w-4 h-4" />
-              <span>Reports & Downloads</span>
+              <span>Reports</span>
             </NavLink>
           </nav>
 

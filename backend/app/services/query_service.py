@@ -159,6 +159,24 @@ class QueryService:
             "ts": latest_manual.ts.isoformat()
         } if latest_manual else None
 
+        # Latest recorded machine HMI screen OCR snapshot
+        recent_rows = (
+            db.query(Reading.ts, Reading.raw)
+            .filter(Reading.device_id == device_id, Reading.raw.isnot(None))
+            .order_by(desc(Reading.ts))
+            .limit(200)
+            .all()
+        )
+        latest_screen = None
+        for r_ts, r_raw in recent_rows:
+            if isinstance(r_raw, dict) and r_raw.get("machine_screen"):
+                latest_screen = {
+                    **r_raw["machine_screen"],
+                    "ts": r_ts.isoformat()
+                }
+                break
+        cards["latest_machine_screen"] = latest_screen
+
         return cards
 
     def get_trend_charts(
@@ -247,7 +265,18 @@ class QueryService:
                     "pf_avg": None, "pf1": None, "pf2": None, "pf3": None,
                     "freq": None,
                     "temperature": None,
-                    "rpm": None
+                    "rpm": None,
+                    "count_ne": None,
+                    "spindle_rpm": None,
+                    "tpi": None,
+                    "doff_time_min": None,
+                    "front_roller_rpm": None,
+                    "delivery_speed_m_min": None,
+                    "chase_mm": None,
+                    "length_m": None,
+                    "screen_efficiency_pct": None,
+                    "suction_pressure_mm_wc": None,
+                    "machine_screen": None
                 })
             else:
                 avg_kw = sum(v["t_kw"] for v in vals if v["t_kw"] is not None) / max(len(vals), 1)
@@ -325,7 +354,18 @@ class QueryService:
                     "pf3": pf3_val,
                     "freq": self._safe_round(self._avg([v.get("freq") for v in vals]), 2),
                     "temperature": self._safe_round(self._avg([v.get("temperature") for v in vals if v.get("temperature") is not None]), 1),
-                    "rpm": self._safe_round(self._avg([v.get("rpm") for v in vals if v.get("rpm") is not None]), 0)
+                    "rpm": self._safe_round(self._avg([v.get("rpm") for v in vals if v.get("rpm") is not None]), 0),
+                    "count_ne": self._safe_round(self._avg([v.get("count_ne") for v in vals if v.get("count_ne") is not None]), 2),
+                    "spindle_rpm": self._safe_round(self._avg([v.get("spindle_rpm") for v in vals if v.get("spindle_rpm") is not None]), 0),
+                    "tpi": self._safe_round(self._avg([v.get("tpi") for v in vals if v.get("tpi") is not None]), 2),
+                    "doff_time_min": self._safe_round(self._avg([v.get("doff_time_min") for v in vals if v.get("doff_time_min") is not None]), 1),
+                    "front_roller_rpm": self._safe_round(self._avg([v.get("front_roller_rpm") for v in vals if v.get("front_roller_rpm") is not None]), 1),
+                    "delivery_speed_m_min": self._safe_round(self._avg([v.get("delivery_speed_m_min") for v in vals if v.get("delivery_speed_m_min") is not None]), 2),
+                    "chase_mm": self._safe_round(self._avg([v.get("chase_mm") for v in vals if v.get("chase_mm") is not None]), 2),
+                    "length_m": self._safe_round(self._avg([v.get("length_m") for v in vals if v.get("length_m") is not None]), 1),
+                    "screen_efficiency_pct": self._safe_round(self._avg([v.get("screen_efficiency_pct") for v in vals if v.get("screen_efficiency_pct") is not None]), 1),
+                    "suction_pressure_mm_wc": self._safe_round(self._avg([v.get("suction_pressure_mm_wc") for v in vals if v.get("suction_pressure_mm_wc") is not None]), 1),
+                    "machine_screen": next((v.get("machine_screen") for v in reversed(vals) if v.get("machine_screen")), None)
                 })
 
         return {"points": points, "alert_windows": alert_windows}
@@ -546,6 +586,13 @@ class QueryService:
         if counter_delta > 0:
             discrepancy_pct = round(abs(total_energy_kwh - counter_delta) / counter_delta * 100.0, 1)
 
+        screen_snapshots = [
+            {**(r.raw["machine_screen"]), "ts": r.ts.isoformat()}
+            for r in readings
+            if isinstance(r.raw, dict) and isinstance(r.raw.get("machine_screen"), dict)
+        ]
+        latest_screen_in_period = screen_snapshots[-1] if screen_snapshots else None
+
         return {
             "start_time": start_time.isoformat(),
             "end_time": end_time.isoformat(),
@@ -578,7 +625,9 @@ class QueryService:
             "avg_frequency": round(sum(freq_list) / len(freq_list), 2) if freq_list else None,
             "current_unbalance_pct": i_unbalance_pct,
             "data_completeness_pct": final_completeness,
-            "samples_count": received_samples
+            "samples_count": received_samples,
+            "machine_screen_count": len(screen_snapshots),
+            "latest_machine_screen": latest_screen_in_period
         }
 
     def _integrate_energy(self, time_kw_pairs: List[Tuple[datetime, Optional[float]]], expected_interval_s: int = 60) -> float:
@@ -647,6 +696,7 @@ class QueryService:
                 v23_val = r.v23 if r.v23 is not None else (r.v2n * 1.732 if r.v2n is not None else None)
                 v31_val = r.v31 if r.v31 is not None else (r.v3n * 1.732 if r.v3n is not None else None)
                 kw1_val, kw2_val, kw3_val = self._resolve_phase_powers(r)
+                ms = r.raw.get("machine_screen") if isinstance(r.raw, dict) and isinstance(r.raw.get("machine_screen"), dict) else None
                 buckets[b_key].append({
                     "t_kw": r.t_kw, "kw1": kw1_val, "kw2": kw2_val, "kw3": kw3_val,
                     "vln_avg": r.vln_avg, "v1n": r.v1n, "v2n": r.v2n, "v3n": r.v3n,
@@ -655,7 +705,18 @@ class QueryService:
                     "pf_avg": r.pf_avg, "pf1": r.pf1, "pf2": r.pf2, "pf3": r.pf3,
                     "freq": r.freq,
                     "temperature": r.temperature,
-                    "rpm": r.rpm
+                    "rpm": r.rpm,
+                    "count_ne": ms.get("count_ne") if ms else None,
+                    "spindle_rpm": ms.get("spindle_rpm") if ms else None,
+                    "tpi": ms.get("tpi") if ms else None,
+                    "doff_time_min": ms.get("doff_time_min") if ms else None,
+                    "front_roller_rpm": ms.get("front_roller_rpm") if ms else None,
+                    "delivery_speed_m_min": ms.get("delivery_speed_m_min") if ms else None,
+                    "chase_mm": ms.get("chase_mm") if ms else None,
+                    "length_m": ms.get("length_m") if ms else None,
+                    "screen_efficiency_pct": ms.get("efficiency_pct") if ms else None,
+                    "suction_pressure_mm_wc": ms.get("suction_pressure_mm_wc") if ms else None,
+                    "machine_screen": ms
                 })
         return buckets
 

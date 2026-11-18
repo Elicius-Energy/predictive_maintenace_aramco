@@ -1,11 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useDevice } from '../contexts/DeviceContext';
 import {
   Save, CheckCircle2, AlertCircle, ChevronDown, ChevronUp,
   Cpu, Building, Zap, Cog, Activity, UserCheck, ShieldCheck,
-  IndianRupee, Sliders, Plus, Trash2
+  IndianRupee, Sliders, Plus, Trash2, Camera, Loader2, AlertTriangle
 } from 'lucide-react';
+import {
+  uploadMachineScreenImage,
+  type MachineScreenOcrResponse
+} from '../utils/machineScreenOcr';
 
 export const Configuration: React.FC = () => {
   const { selectedDeviceId, refreshDevices } = useDevice();
@@ -19,6 +23,40 @@ export const Configuration: React.FC = () => {
   const [regDeviceId, setRegDeviceId] = useState('');
   const [regAlias, setRegAlias] = useState('');
   const [registering, setRegistering] = useState(false);
+
+  // Machine Screen OCR Upload state
+  const screenFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploadingScreen, setUploadingScreen] = useState(false);
+  const [screenOcrModal, setScreenOcrModal] = useState<MachineScreenOcrResponse | null>(null);
+
+  const handleScreenUploadChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !selectedDeviceId) return;
+
+    setUploadingScreen(true);
+    setBaselineSuccess(null);
+    setErrorMessage(null);
+    setScreenOcrModal(null);
+
+    try {
+      const res = await uploadMachineScreenImage(selectedDeviceId, file);
+      if (res.success && res.profile_updated) {
+        setProfile((prev: any) => ({
+          ...(prev || {}),
+          ...res.profile_updated,
+        }));
+        setBaselineSuccess(res.message || 'Machine details populated from screen photo.');
+      }
+      if (!res.success || res.needs_reupload) {
+        setScreenOcrModal(res);
+      }
+    } catch (err: any) {
+      setErrorMessage(err.response?.data?.detail || err.message || 'Failed to read machine screen photo.');
+    } finally {
+      setUploadingScreen(false);
+    }
+  };
 
   // Collapsible section states (first two open by default)
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -569,22 +607,76 @@ export const Configuration: React.FC = () => {
           </button>
 
           {openSections.machine && (
-            <div className="p-5 border-t border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+            <div className="p-5 border-t border-slate-200 space-y-4 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-lg bg-indigo-50/70 border border-indigo-200/80">
+                <div>
+                  <div className="font-bold text-slate-800">Auto-Fill from Machine HMI Screen</div>
+                  <div className="text-[11px] text-slate-500">
+                    Upload a photo of the machine display to automatically extract and populate Make, Model, Count, Spindle RPM, TPI, and Doff Time.
+                  </div>
+                </div>
+                <div>
+                  <input
+                    ref={screenFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleScreenUploadChange}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => screenFileInputRef.current?.click()}
+                    disabled={uploadingScreen}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs transition-colors cursor-pointer shadow-xs"
+                  >
+                    {uploadingScreen ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Camera className="w-3.5 h-3.5" />
+                    )}
+                    <span>{uploadingScreen ? 'Extracting via OCR...' : 'Upload Machine Screen'}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Machine Name</label>
                 <input
                   type="text"
-                  value={profile?.machine_name || 'Ring Frame 14'}
+                  value={profile?.machine_name ?? ''}
+                  placeholder="e.g. RINGFRAME"
                   onChange={(e) => handleInputChange('machine_name', e.target.value)}
                   className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
                 />
               </div>
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Make & Model</label>
+                <label className="block font-semibold text-slate-700 mb-1">Machine Make</label>
                 <input
                   type="text"
-                  value={profile?.machine_model_no || 'LMW LR9/AXL'}
+                  value={profile?.machine_make ?? ''}
+                  placeholder="e.g. LMW"
+                  onChange={(e) => handleInputChange('machine_make', e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Model No.</label>
+                <input
+                  type="text"
+                  value={profile?.machine_model_no ?? ''}
+                  placeholder="e.g. LRJ 60A - M"
                   onChange={(e) => handleInputChange('machine_model_no', e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Count (Ne)</label>
+                <input
+                  type="text"
+                  value={profile?.machine_count ?? ''}
+                  placeholder="e.g. 81s Ne"
+                  onChange={(e) => handleInputChange('machine_count', e.target.value)}
                   className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
                 />
               </div>
@@ -652,6 +744,7 @@ export const Configuration: React.FC = () => {
                   onChange={(e) => handleInputChange('doff_time_min', e.target.value === '' ? null : parseFloat(e.target.value))}
                   className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
                 />
+              </div>
               </div>
             </div>
           )}
@@ -931,6 +1024,82 @@ export const Configuration: React.FC = () => {
         </div>
 
       </form>
+
+      {/* ── MACHINE SCREEN OCR CLARITY / RE-UPLOAD POP-UP MODAL ─────────── */}
+      {screenOcrModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-md w-full p-5 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                  screenOcrModal.success ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
+                }`}>
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    {screenOcrModal.success
+                      ? 'Some Screen Values Were Unclear'
+                      : 'Machine Screen Image Unclear'}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {screenOcrModal.success
+                      ? 'Clear values were populated; unclear fields were left empty.'
+                      : 'No data was populated because the screen could not be read clearly.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setScreenOcrModal(null)}
+                className="text-slate-400 hover:text-slate-600 text-lg font-bold leading-none cursor-pointer"
+              >
+                ×
+              </button>
+            </div>
+
+            {screenOcrModal.reason && (
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700">
+                {screenOcrModal.reason}
+              </div>
+            )}
+
+            {screenOcrModal.unclear_fields && screenOcrModal.unclear_fields.length > 0 && (
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1">
+                <div className="font-bold">Fields left empty (unclear in photo):</div>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {screenOcrModal.unclear_fields.map((f, idx) => (
+                    <span key={idx} className="px-2 py-0.5 rounded bg-white border border-amber-300 font-semibold text-[11px]">
+                      {f}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setScreenOcrModal(null)}
+                className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+              >
+                {screenOcrModal.success ? 'Keep Current Data' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setScreenOcrModal(null);
+                  screenFileInputRef.current?.click();
+                }}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-[#1F3A8A] hover:bg-blue-900 text-white text-xs font-bold cursor-pointer shadow-xs"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>Re-upload Clearer Photo</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -200,11 +200,15 @@ def download_raw_data(
         "kw1", "kw2", "kw3", "t_kw", "kvar1", "kvar2", "kvar3", "t_kvar",
         "kva1", "kva2", "kva3", "t_kva", "pf1", "pf2", "pf3", "pf_avg",
         "freq", "kwh_imp", "kvarh_imp", "t_kvah", "md_kw", "md_kva",
-        "temperature_c", "rpm"
+        "temperature_c", "rpm",
+        "count_ne", "spindle_rpm", "tpi", "doff_time_min",
+        "front_roller_rpm", "delivery_speed_m_min", "chase_mm", "length_m",
+        "screen_efficiency_pct", "suction_pressure_mm_wc"
     ])
 
     for r in readings:
         date_str, time_str = _fmt_ist_date_time(r.ts)
+        ms = r.raw.get("machine_screen") if isinstance(r.raw, dict) and isinstance(r.raw.get("machine_screen"), dict) else {}
         writer.writerow([
             date_str, time_str, r.device_id, r.v1n, r.v2n, r.v3n, r.vln_avg,
             r.v12, r.v23, r.v31, r.vll_avg, r.i1, r.i2, r.i3, r.i_avg,
@@ -212,7 +216,17 @@ def download_raw_data(
             r.kva1, r.kva2, r.kva3, r.t_kva, r.pf1, r.pf2, r.pf3, r.pf_avg,
             r.freq, r.kwh_imp, r.kvarh_imp, r.t_kvah, r.md_kw, r.md_kva,
             r.temperature if r.temperature is not None else "",
-            int(r.rpm) if r.rpm is not None else ""
+            int(r.rpm) if r.rpm is not None else "",
+            ms.get("count_ne") if ms.get("count_ne") is not None else "",
+            int(ms["spindle_rpm"]) if ms.get("spindle_rpm") is not None else "",
+            ms.get("tpi") if ms.get("tpi") is not None else "",
+            ms.get("doff_time_min") if ms.get("doff_time_min") is not None else "",
+            ms.get("front_roller_rpm") if ms.get("front_roller_rpm") is not None else "",
+            ms.get("delivery_speed_m_min") if ms.get("delivery_speed_m_min") is not None else "",
+            ms.get("chase_mm") if ms.get("chase_mm") is not None else "",
+            ms.get("length_m") if ms.get("length_m") is not None else "",
+            ms.get("efficiency_pct") if ms.get("efficiency_pct") is not None else "",
+            ms.get("suction_pressure_mm_wc") if ms.get("suction_pressure_mm_wc") is not None else ""
         ])
 
     output.seek(0)

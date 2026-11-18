@@ -378,23 +378,41 @@ class ExcelReportService:
         row += 2
 
         # 3. MACHINE DETAILS
+        ms_latest = summary.get("latest_machine_screen") or {}
         ws.merge_range(row, 0, row, 4, "3. MACHINE DETAILS", f_sec)
         row += 1
-        ws.write(row, 1, "Machine Name:", f_bold); ws.write(row, 2, profile.machine_name or "", f_cell)
-        ws.write(row, 3, "Make:", f_bold); ws.write(row, 4, profile.machine_make or "", f_cell)
+        ws.write(row, 1, "Machine Name:", f_bold); ws.write(row, 2, profile.machine_name or ms_latest.get("machine_name") or "", f_cell)
+        ws.write(row, 3, "Make:", f_bold); ws.write(row, 4, profile.machine_make or ms_latest.get("machine_make") or "", f_cell)
         row += 1
-        ws.write(row, 1, "Model No.:", f_bold); ws.write(row, 2, profile.machine_model_no or "", f_cell)
-        ws.write(row, 3, "Count:", f_bold); ws.write(row, 4, profile.machine_count or "", f_cell)
+        ws.write(row, 1, "Model No.:", f_bold); ws.write(row, 2, profile.machine_model_no or ms_latest.get("machine_model_no") or "", f_cell)
+        count_val = profile.machine_count or (f"{ms_latest['count_ne']} Ne" if ms_latest.get("count_ne") is not None else "")
+        ws.write(row, 3, "Count:", f_bold); ws.write(row, 4, count_val, f_cell)
         row += 1
-        ws.write(row, 1, "TPI:", f_bold); ws.write(row, 2, profile.machine_tpi or "", f_cell)
+        tpi_val = profile.machine_tpi or (str(ms_latest["tpi"]) if ms_latest.get("tpi") is not None else "")
+        ws.write(row, 1, "TPI:", f_bold); ws.write(row, 2, tpi_val, f_cell)
         ws.write(row, 3, "Raw Material:", f_bold); ws.write(row, 4, profile.raw_material or "", f_cell)
         row += 1
-        ws.write(row, 1, "Spindle RPM – Maximum:", f_bold); ws.write(row, 2, profile.machine_rpm_max if profile.machine_rpm_max is not None else "", f_num if profile.machine_rpm_max is not None else f_cell)
-        ws.write(row, 3, "Spindle RPM – Average:", f_bold); ws.write(row, 4, profile.machine_rpm_avg if profile.machine_rpm_avg is not None else "", f_num if profile.machine_rpm_avg is not None else f_cell)
+        rpm_max_val = profile.machine_rpm_max if profile.machine_rpm_max is not None else ms_latest.get("spindle_rpm")
+        rpm_avg_val = profile.machine_rpm_avg if profile.machine_rpm_avg is not None else ms_latest.get("spindle_rpm")
+        ws.write(row, 1, "Spindle RPM – Maximum:", f_bold); ws.write(row, 2, rpm_max_val if rpm_max_val is not None else "", f_num if rpm_max_val is not None else f_cell)
+        ws.write(row, 3, "Spindle RPM – Average:", f_bold); ws.write(row, 4, rpm_avg_val if rpm_avg_val is not None else "", f_num if rpm_avg_val is not None else f_cell)
         row += 1
         ws.write(row, 1, "No. of Spindles:", f_bold); ws.write(row, 2, profile.no_of_spindles if profile.no_of_spindles is not None else "", f_num if profile.no_of_spindles is not None else f_cell)
         doff_val = getattr(profile, "doff_time_min", None)
+        if doff_val is None:
+            doff_val = ms_latest.get("doff_time_min")
         ws.write(row, 3, "Doff time in Min:", f_bold); ws.write(row, 4, doff_val if doff_val is not None else "", f_num if doff_val is not None else f_cell)
+        if ms_latest:
+            row += 1
+            fr_rpm = ms_latest.get("front_roller_rpm")
+            deliv = ms_latest.get("delivery_speed_m_min")
+            ws.write(row, 1, "Front Roller Speed (RPM):", f_bold); ws.write(row, 2, fr_rpm if fr_rpm is not None else "", f_num if fr_rpm is not None else f_cell)
+            ws.write(row, 3, "Delivery Speed (m/min):", f_bold); ws.write(row, 4, deliv if deliv is not None else "", f_num if deliv is not None else f_cell)
+            row += 1
+            suction = ms_latest.get("suction_pressure_mm_wc")
+            chase = ms_latest.get("chase_mm")
+            ws.write(row, 1, "Suction Pressure (mm WC):", f_bold); ws.write(row, 2, suction if suction is not None else "", f_num if suction is not None else f_cell)
+            ws.write(row, 3, "Chase / Lift (mm):", f_bold); ws.write(row, 4, chase if chase is not None else "", f_num if chase is not None else f_cell)
         row += 2
 
         # 4. INVERTER DETAILS
@@ -929,6 +947,24 @@ class ExcelReportService:
             ])
         ]
 
+        ms_latest = summary.get("latest_machine_screen")
+        if ms_latest:
+            sections.append((
+                "MACHINE SCREEN (HMI) TELEMETRY",
+                [
+                    ("Count", ms_latest.get("count_ne"), "Ne"),
+                    ("Spindle Speed", ms_latest.get("spindle_rpm"), "RPM"),
+                    ("Front Roller Speed", ms_latest.get("front_roller_rpm"), "RPM"),
+                    ("Twists Per Inch (TPI)", ms_latest.get("tpi"), "TPI"),
+                    ("Delivery Speed", ms_latest.get("delivery_speed_m_min"), "m/min"),
+                    ("Chase / Lift", ms_latest.get("chase_mm"), "mm"),
+                    ("Length", ms_latest.get("length_m"), "M"),
+                    ("Doff Time", ms_latest.get("doff_time_min"), "min"),
+                    ("Machine Production Efficiency", ms_latest.get("efficiency_pct") / 100.0 if ms_latest.get("efficiency_pct") is not None else None, "%"),
+                    ("Suction Pressure", ms_latest.get("suction_pressure_mm_wc"), "mm WC"),
+                ]
+            ))
+
         for sec_name, items in sections:
             ws.merge_range(row, 1, row, 3, sec_name, f_sec)
             row += 1
@@ -951,7 +987,10 @@ class ExcelReportService:
             "Date (IST)", "Time (IST)", "Interval kWh", "Cumulative kWh", "Power (kW)",
             "kW L1", "kW L2", "kW L3", "Voltage L-L Avg (V)", "V12", "V23", "V31",
             "Current Avg (A)", "I L1", "I L2", "I L3", "PF Avg", "PF L1", "PF L2", "PF L3", "Frequency (Hz)",
-            "Temperature (°C)", "Speed (RPM)"
+            "Temperature (°C)", "Speed (RPM)",
+            "Count (Ne)", "Spindle RPM", "TPI", "Doff Time (min)",
+            "Front Roller RPM", "Delivery (m/min)", "Chase (mm)", "Length (M)",
+            "Machine Eff (%)", "Suction (mm WC)"
         ]
         for col, h in enumerate(headers):
             ws.write(0, col, h, f_hdr)
@@ -988,6 +1027,22 @@ class ExcelReportService:
             rpm_val = pt.get("rpm")
             ws.write(row, 21, temp_val if temp_val is not None else "", f_num if temp_val is not None else f_cell)
             ws.write(row, 22, int(rpm_val) if rpm_val is not None else "", f_num if rpm_val is not None else f_cell)
+
+            # Machine screen columns (populated ONLY on the row where the screen image was uploaded)
+            screen_cols = [
+                pt.get("count_ne"),
+                int(pt["spindle_rpm"]) if pt.get("spindle_rpm") is not None else None,
+                pt.get("tpi"),
+                pt.get("doff_time_min"),
+                pt.get("front_roller_rpm"),
+                pt.get("delivery_speed_m_min"),
+                pt.get("chase_mm"),
+                pt.get("length_m"),
+                pt.get("screen_efficiency_pct"),
+                pt.get("suction_pressure_mm_wc"),
+            ]
+            for idx_sc, sc_val in enumerate(screen_cols, start=23):
+                ws.write(row, idx_sc, sc_val if sc_val is not None else "", f_num if sc_val is not None else f_cell)
 
     def _write_sheet_data_summary(self, ws, points, f_hdr, f_cell, f_num, f_bold):
         """Writes the 8-checkpoint shift audit summary sheet ('Data Summery sheet')."""
@@ -1044,12 +1099,21 @@ class ExcelReportService:
                 remarks_str = "Opening reading" if sr == 1 else ""
                 t_val = c_pt.get("temperature")
                 rpm_val = c_pt.get("rpm")
-                if t_val is not None or rpm_val is not None:
+                sp_rpm = c_pt.get("spindle_rpm")
+                tpi_pt = c_pt.get("tpi")
+                cnt_pt = c_pt.get("count_ne")
+                if any(x is not None for x in (t_val, rpm_val, sp_rpm, tpi_pt, cnt_pt)):
                     meas = []
                     if t_val is not None:
                         meas.append(f"Temp: {t_val}°C")
                     if rpm_val is not None:
-                        meas.append(f"RPM: {int(rpm_val)}")
+                        meas.append(f"Motor RPM: {int(rpm_val)}")
+                    if sp_rpm is not None:
+                        meas.append(f"Spindle RPM: {int(sp_rpm)}")
+                    if cnt_pt is not None:
+                        meas.append(f"Count: {cnt_pt} Ne")
+                    if tpi_pt is not None:
+                        meas.append(f"TPI: {tpi_pt}")
                     m_str = ", ".join(meas)
                     remarks_str = f"{remarks_str} ({m_str})" if remarks_str else m_str
 

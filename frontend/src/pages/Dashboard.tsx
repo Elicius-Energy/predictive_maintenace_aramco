@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useDevice } from '../contexts/DeviceContext';
 import {
   Activity, Zap, Gauge, Flame, Clock, RefreshCw, AlertTriangle,
-  CheckCircle2, WifiOff, AlertCircle, Loader2, Thermometer, RotateCw, Check
+  CheckCircle2, WifiOff, AlertCircle, Loader2, Thermometer, RotateCw, Check, Camera
 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
@@ -11,6 +11,11 @@ import {
   PieChart, Pie, Cell
 } from 'recharts';
 import { SmartRoiSection } from '../components/dashboard/SmartRoiSection';
+import {
+  uploadMachineScreenImage,
+  type MachineScreenOcrResponse,
+  type MachineScreenExtracted
+} from '../utils/machineScreenOcr';
 
 export const Dashboard: React.FC = () => {
   const { devices, selectedDevice, selectedDeviceId, getStatusColor } = useDevice();
@@ -294,6 +299,12 @@ export const Dashboard: React.FC = () => {
   const [manualErrorMsg, setManualErrorMsg] = useState<string | null>(null);
   const [latestManual, setLatestManual] = useState<any>(null);
 
+  // Machine HMI Screen OCR Upload state
+  const screenFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploadingScreen, setUploadingScreen] = useState<boolean>(false);
+  const [latestMachineScreen, setLatestMachineScreen] = useState<MachineScreenExtracted | null>(null);
+  const [screenOcrModal, setScreenOcrModal] = useState<MachineScreenOcrResponse | null>(null);
+
   // 1. Polling for Live Cards (every 5 seconds)
   const fetchLive = async () => {
     if (!selectedDeviceId) return;
@@ -302,6 +313,9 @@ export const Dashboard: React.FC = () => {
       setLiveData(res.data);
       if (res.data?.latest_manual) {
         setLatestManual(res.data.latest_manual);
+      }
+      if (res.data?.latest_machine_screen) {
+        setLatestMachineScreen(res.data.latest_machine_screen);
       }
     } catch (err) {
       console.error('Error fetching live data:', err);
@@ -421,6 +435,41 @@ export const Dashboard: React.FC = () => {
       setManualErrorMsg(err.response?.data?.detail || 'Failed to record manual measurements to database.');
     } finally {
       setRecordingManual(false);
+    }
+  };
+
+  const handleScreenUploadChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Immediately clear input so the browser does not retain the image File in memory
+    e.target.value = '';
+    if (!file || !selectedDeviceId) return;
+
+    setUploadingScreen(true);
+    setManualSuccessMsg(null);
+    setManualErrorMsg(null);
+    setScreenOcrModal(null);
+
+    try {
+      const targetIso = new Date().toISOString();
+      const res = await uploadMachineScreenImage(selectedDeviceId, file, targetIso);
+
+      if (res.success) {
+        setLatestMachineScreen({
+          ...res.extracted,
+          ts: res.matched_timestamp || targetIso,
+        });
+        setManualSuccessMsg(res.message || 'Machine screen OCR data extracted and saved.');
+        fetchTrendsAndSummary(false);
+      }
+
+      if (!res.success || res.needs_reupload) {
+        setScreenOcrModal(res);
+      }
+    } catch (err: any) {
+      console.error('Error uploading machine screen:', err);
+      setManualErrorMsg(err.response?.data?.detail || err.message || 'Failed to process machine screen image.');
+    } finally {
+      setUploadingScreen(false);
     }
   };
 
@@ -838,20 +887,57 @@ export const Dashboard: React.FC = () => {
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-bold text-slate-800">Manual Motor Measurements</span>
+                <span className="text-xs font-bold text-slate-800">Manual Motor & Machine Screen Measurements</span>
                 {latestManual && (
                   <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">
-                    Last: {latestManual.temperature} °C • {latestManual.rpm} RPM ({formatIstDateTime(latestManual.ts)})
+                    Motor: {latestManual.temperature} °C • {latestManual.rpm} RPM ({formatIstDateTime(latestManual.ts)})
+                  </span>
+                )}
+                {latestMachineScreen && (
+                  <span className="text-[10px] bg-indigo-50 text-indigo-800 border border-indigo-200 px-2 py-0.5 rounded-full font-semibold">
+                    Screen: {[
+                      latestMachineScreen.machine_model_no || latestMachineScreen.machine_name,
+                      latestMachineScreen.count_ne != null ? `${latestMachineScreen.count_ne} Ne` : null,
+                      latestMachineScreen.spindle_rpm != null ? `${latestMachineScreen.spindle_rpm} RPM` : null,
+                      latestMachineScreen.tpi != null ? `TPI ${latestMachineScreen.tpi}` : null,
+                      latestMachineScreen.doff_time_min != null ? `Doff ${latestMachineScreen.doff_time_min}m` : null,
+                    ].filter(Boolean).join(' • ')}
+                    {latestMachineScreen.ts ? ` (${formatIstDateTime(latestMachineScreen.ts)})` : ''}
                   </span>
                 )}
               </div>
               <p className="text-[11px] text-slate-500">
-                Enter on-site temperature and RPM to record them onto the nearest timestamp row in this dataset.
+                Enter on-site temperature & RPM or upload a machine HMI screen photo (OCR) to record onto the nearest timestamp row.
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Hidden file input for Machine Screen OCR */}
+            <input
+              ref={screenFileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleScreenUploadChange}
+              className="hidden"
+            />
+
+            {/* Upload Machine Screen Button */}
+            <button
+              type="button"
+              onClick={() => screenFileInputRef.current?.click()}
+              disabled={uploadingScreen}
+              title="Upload photo of the machine screen to extract parameters via AI OCR and populate configuration & data row"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs"
+            >
+              {uploadingScreen ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Camera className="w-3.5 h-3.5" />
+              )}
+              <span>{uploadingScreen ? 'Reading Screen...' : 'Upload Machine Screen'}</span>
+            </button>
+
             {/* Temperature Input */}
             <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2.5 py-1 shadow-2xs">
               <Thermometer className="w-3.5 h-3.5 text-rose-500 shrink-0" />
@@ -1310,6 +1396,81 @@ export const Dashboard: React.FC = () => {
       {/* ── SMART ROI CALCULATION & AI MARKET INTELLIGENCE TAB ──────────── */}
       {selectedDeviceId && (
         <SmartRoiSection deviceId={selectedDeviceId} />
+      )}
+
+      {/* ── MACHINE SCREEN OCR CLARITY / RE-UPLOAD POP-UP MODAL ─────────── */}
+      {screenOcrModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-md w-full p-5 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                  screenOcrModal.success ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
+                }`}>
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    {screenOcrModal.success
+                      ? 'Some Screen Values Were Unclear'
+                      : 'Machine Screen Image Unclear'}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {screenOcrModal.success
+                      ? 'Clear values were saved; unclear fields were left empty.'
+                      : 'No data was written because the screen could not be read clearly.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setScreenOcrModal(null)}
+                className="text-slate-400 hover:text-slate-600 text-lg font-bold leading-none cursor-pointer"
+              >
+                ×
+              </button>
+            </div>
+
+            {screenOcrModal.reason && (
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700">
+                {screenOcrModal.reason}
+              </div>
+            )}
+
+            {screenOcrModal.unclear_fields && screenOcrModal.unclear_fields.length > 0 && (
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1">
+                <div className="font-bold">Fields left empty (unclear in photo):</div>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {screenOcrModal.unclear_fields.map((f, idx) => (
+                    <span key={idx} className="px-2 py-0.5 rounded bg-white border border-amber-300 font-semibold text-[11px]">
+                      {f}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setScreenOcrModal(null)}
+                className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+              >
+                {screenOcrModal.success ? 'Keep Current Data' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setScreenOcrModal(null);
+                  screenFileInputRef.current?.click();
+                }}
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-[#1F3A8A] hover:bg-blue-900 text-white text-xs font-bold cursor-pointer shadow-xs"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>Re-upload Clearer Photo</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>
