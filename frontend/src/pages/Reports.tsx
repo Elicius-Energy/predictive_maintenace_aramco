@@ -312,6 +312,7 @@ export const Reports: React.FC = () => {
   const handleDownloadRaw = async (format: 'csv' | 'xlsx' = 'csv') => {
     if (!selectedDeviceId) return;
     setDownloadingRaw(true);
+    setErrorMsg(null);
     const startIso = toIsoUtc(startDate, startTime);
     const endIso = toIsoUtc(endDate, endTime);
 
@@ -321,6 +322,7 @@ export const Reports: React.FC = () => {
         {
           responseType: 'blob',
           withCredentials: true,
+          timeout: 300000,
         }
       );
 

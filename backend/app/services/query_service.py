@@ -6,7 +6,7 @@ energy-weighted power factor, running vs idle time, and period summaries.
 from datetime import datetime, timezone, timedelta
 import math
 from typing import Dict, Any, List, Optional, Tuple
-from sqlalchemy import text, desc
+from sqlalchemy import text, desc, cast, String
 from sqlalchemy.orm import Session
 from app.db.models import Device, DeviceProfile, Reading, Alert
 
@@ -210,9 +210,17 @@ class QueryService:
                 "alert_windows": []
             }
 
-        # Query readings in window
+        # Query readings in window using lightweight column tuples (skipping large JSONB 'raw' blobs)
         readings = (
-            db.query(Reading)
+            db.query(
+                Reading.ts, Reading.t_kw, Reading.kw1, Reading.kw2, Reading.kw3,
+                Reading.vll_avg, Reading.vln_avg,
+                Reading.v12, Reading.v23, Reading.v31,
+                Reading.v1n, Reading.v2n, Reading.v3n,
+                Reading.i_avg, Reading.i1, Reading.i2, Reading.i3,
+                Reading.pf_avg, Reading.pf1, Reading.pf2, Reading.pf3,
+                Reading.freq, Reading.temperature, Reading.rpm
+            )
             .filter(
                 Reading.device_id == device_id,
                 Reading.ts >= start_time,
@@ -221,6 +229,24 @@ class QueryService:
             .order_by(Reading.ts.asc())
             .all()
         )
+
+        # Fetch only rows that have machine_screen OCR data (typically 0 to a few rows)
+        screen_rows = (
+            db.query(Reading.ts, Reading.raw)
+            .filter(
+                Reading.device_id == device_id,
+                Reading.ts >= start_time,
+                Reading.ts <= end_time,
+                Reading.raw.isnot(None),
+                cast(Reading.raw, String).like('%"machine_screen"%')
+            )
+            .all()
+        )
+        screen_by_ts = {
+            (int(r_ts.timestamp()) if r_ts.tzinfo else int(r_ts.replace(tzinfo=timezone.utc).timestamp())): r_raw.get("machine_screen")
+            for r_ts, r_raw in screen_rows
+            if isinstance(r_raw, dict) and isinstance(r_raw.get("machine_screen"), dict)
+        }
 
         # Alerts in window for shaded alert bands
         alerts = (
@@ -247,7 +273,7 @@ class QueryService:
             return {"points": [], "alert_windows": alert_windows}
 
         # Bucket readings by interval
-        bucket_map = self._bucket_readings(readings, interval_seconds, start_time, end_time)
+        bucket_map = self._bucket_readings(readings, interval_seconds, start_time, end_time, screen_by_ts)
 
         # Integrate interval energy (kWh per bucket)
         prev_cum_kwh = 0.0
@@ -396,8 +422,16 @@ class QueryService:
         elif profile and profile.motor_rating_kw:
             idle_th = profile.motor_rating_kw * 0.05
 
+        # Fetch lightweight column tuples (skipping full ORM instantiation and large JSONB 'raw' blobs)
         readings = (
-            db.query(Reading)
+            db.query(
+                Reading.ts, Reading.t_kw, Reading.t_kva, Reading.pf_avg,
+                Reading.vll_avg, Reading.vln_avg, Reading.i_avg, Reading.freq,
+                Reading.v12, Reading.v23, Reading.v31,
+                Reading.v1n, Reading.v2n, Reading.v3n,
+                Reading.i1, Reading.i2, Reading.i3,
+                Reading.md_kw, Reading.kwh_imp
+            )
             .filter(
                 Reading.device_id == device_id,
                 Reading.ts >= start_time,
@@ -590,10 +624,23 @@ class QueryService:
         if counter_delta > 0:
             discrepancy_pct = round(abs(total_energy_kwh - counter_delta) / counter_delta * 100.0, 1)
 
+        # Query only rows that actually contain machine_screen JSON (instead of loading raw JSONB for all rows)
+        screen_rows = (
+            db.query(Reading.ts, Reading.raw)
+            .filter(
+                Reading.device_id == device_id,
+                Reading.ts >= start_time,
+                Reading.ts <= end_time,
+                Reading.raw.isnot(None),
+                cast(Reading.raw, String).like('%"machine_screen"%')
+            )
+            .order_by(Reading.ts.asc())
+            .all()
+        )
         screen_snapshots = [
-            {**(r.raw["machine_screen"]), "ts": r.ts.isoformat()}
-            for r in readings
-            if isinstance(r.raw, dict) and isinstance(r.raw.get("machine_screen"), dict)
+            {**(r_raw["machine_screen"]), "ts": r_ts.isoformat()}
+            for r_ts, r_raw in screen_rows
+            if isinstance(r_raw, dict) and isinstance(r_raw.get("machine_screen"), dict)
         ]
         latest_screen_in_period = screen_snapshots[-1] if screen_snapshots else None
 
@@ -681,10 +728,18 @@ class QueryService:
             return p1, p2, p3
         return kw1, kw2, kw3
 
-    def _bucket_readings(self, readings: List[Reading], interval_s: int, start: datetime, end: datetime) -> Dict[int, List[Dict[str, Any]]]:
+    def _bucket_readings(
+        self,
+        readings: List[Any],
+        interval_s: int,
+        start: datetime,
+        end: datetime,
+        screen_by_ts: Optional[Dict[int, Dict[str, Any]]] = None
+    ) -> Dict[int, List[Dict[str, Any]]]:
         """Group readings into regular timestamp buckets with missing intervals represented."""
         start_aligned = (int(start.timestamp()) // interval_s) * interval_s
         end_aligned = (int(end.timestamp()) // interval_s) * interval_s
+        screen_lookup = screen_by_ts or {}
         
         # Initialize buckets aligned to interval_s
         buckets: Dict[int, List[Dict[str, Any]]] = {}
@@ -700,7 +755,9 @@ class QueryService:
                 v23_val = r.v23 if r.v23 is not None else (r.v2n * 1.732 if r.v2n is not None else None)
                 v31_val = r.v31 if r.v31 is not None else (r.v3n * 1.732 if r.v3n is not None else None)
                 kw1_val, kw2_val, kw3_val = self._resolve_phase_powers(r)
-                ms = r.raw.get("machine_screen") if isinstance(r.raw, dict) and isinstance(r.raw.get("machine_screen"), dict) else None
+                ms = screen_lookup.get(r_ts)
+                if ms is None and hasattr(r, "raw") and isinstance(r.raw, dict):
+                    ms = r.raw.get("machine_screen") if isinstance(r.raw.get("machine_screen"), dict) else None
                 buckets[b_key].append({
                     "t_kw": r.t_kw, "kw1": kw1_val, "kw2": kw2_val, "kw3": kw3_val,
                     "vln_avg": r.vln_avg, "v1n": r.v1n, "v2n": r.v2n, "v3n": r.v3n,
