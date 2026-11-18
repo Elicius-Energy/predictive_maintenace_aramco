@@ -47,7 +47,7 @@ export async function compressImageToBase64(file: File): Promise<{ base64: strin
     const img = new Image();
     img.onload = () => {
       try {
-        const maxDim = 1280;
+        const maxDim = 1600;
         let width = img.naturalWidth || img.width;
         let height = img.naturalHeight || img.height;
         if (width > maxDim || height > maxDim) {
@@ -67,7 +67,7 @@ export async function compressImageToBase64(file: File): Promise<{ base64: strin
           throw new Error('Could not initialize image canvas context');
         }
         ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.90);
         // Immediately release canvas memory
         canvas.width = 0;
         canvas.height = 0;

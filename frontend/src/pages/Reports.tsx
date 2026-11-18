@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useDevice } from '../contexts/DeviceContext';
 import {
-  FileSpreadsheet, Download, RefreshCw, AlertCircle, Eye
+  FileSpreadsheet, Download, RefreshCw, AlertCircle, Eye, Trash2
 } from 'lucide-react';
 
 export const Reports: React.FC = () => {
@@ -196,6 +196,45 @@ export const Reports: React.FC = () => {
   useEffect(() => {
     fetchHistory();
   }, [selectedDeviceId]);
+
+  const getCsrfHeader = (): Record<string, string> => {
+    const csrf = document.cookie
+      .split('; ')
+      .find((part) => part.startsWith('elicius_csrf='))
+      ?.split('=')[1];
+    return csrf ? { 'X-CSRF-Token': decodeURIComponent(csrf) } : {};
+  };
+
+  const handleDeleteReport = async (reportId: number, reportNo: string) => {
+    if (!window.confirm(`Delete report "${reportNo}" from the server? This will permanently remove the file.`)) {
+      return;
+    }
+    try {
+      await axios.delete(`/api/reports/${reportId}`, {
+        withCredentials: true,
+        headers: getCsrfHeader(),
+      });
+      setHistory((prev) => prev.filter((r) => r.id !== reportId));
+    } catch (err: any) {
+      setErrorMsg(err.response?.data?.detail || 'Failed to delete report.');
+    }
+  };
+
+  const handleDeleteAllReports = async () => {
+    if (!selectedDeviceId || history.length === 0) return;
+    if (!window.confirm(`Delete all ${history.length} archived report(s) for this device from the server?`)) {
+      return;
+    }
+    try {
+      await axios.delete(`/api/reports/history/${selectedDeviceId}`, {
+        withCredentials: true,
+        headers: getCsrfHeader(),
+      });
+      setHistory([]);
+    } catch (err: any) {
+      setErrorMsg(err.response?.data?.detail || 'Failed to delete archived reports.');
+    }
+  };
 
   // Generate Excel Report
   const handleGenerateReport = async () => {
@@ -669,13 +708,25 @@ export const Reports: React.FC = () => {
               Access and re-download archived audit workbooks for <span className="font-semibold text-slate-700">{selectedDevice?.alias || selectedDeviceId}</span>.
             </p>
           </div>
-          <button
-            onClick={fetchHistory}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-            title="Refresh History"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            {history.length > 0 && (
+              <button
+                onClick={handleDeleteAllReports}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 border border-rose-200 transition-colors cursor-pointer"
+                title="Delete all archived reports for this device"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Clear All</span>
+              </button>
+            )}
+            <button
+              onClick={fetchHistory}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+              title="Refresh History"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {historyLoading ? (
@@ -712,14 +763,25 @@ export const Reports: React.FC = () => {
                       {rep.energy_kwh} kWh
                     </td>
                     <td className="py-3 px-3 text-right">
-                      <a
-                        href={`/api/reports/download/${rep.id}`}
-                        download
-                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 hover:bg-blue-100 text-[#1F3A8A] font-semibold rounded-md transition-colors"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Download</span>
-                      </a>
+                      <div className="inline-flex items-center gap-2 justify-end">
+                        <a
+                          href={`/api/reports/download/${rep.id}`}
+                          download
+                          className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 hover:bg-blue-100 text-[#1F3A8A] font-semibold rounded-md transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Download</span>
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteReport(rep.id, rep.report_no)}
+                          title="Delete report from server"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold rounded-md border border-rose-200/70 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

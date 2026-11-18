@@ -874,19 +874,37 @@ def upload_machine_screen(
             .first()
         )
 
-    matched_iso = None
-    ist_str = None
-    screen_record["uploaded_at"] = upload_dt.isoformat()
+    matched_iso = upload_dt.isoformat()
+    ist_offset = timezone(timedelta(hours=5, minutes=30))
+    ist_str = upload_dt.astimezone(ist_offset).strftime("%d-%b-%Y %I:%M:%S %p IST")
+    screen_record["uploaded_at"] = matched_iso
 
+    # If the closest telemetry reading is within 90 seconds of the upload time (device is live),
+    # attach to that row; otherwise (e.g. device is currently OFF), insert a row at upload_dt
+    # so the OCR reading is recorded at the exact upload timestamp instead of an old offline row.
+    use_nearest = False
     if nearest:
+        ts_aware = nearest.ts if nearest.ts.tzinfo else nearest.ts.replace(tzinfo=timezone.utc)
+        if abs((upload_dt - ts_aware).total_seconds()) <= 90:
+            use_nearest = True
+
+    if use_nearest and nearest:
         raw_copy = dict(nearest.raw) if isinstance(nearest.raw, dict) else {}
         raw_copy["machine_screen"] = screen_record
         nearest.raw = raw_copy
         flag_modified(nearest, "raw")
         ts_aware = nearest.ts if nearest.ts.tzinfo else nearest.ts.replace(tzinfo=timezone.utc)
         matched_iso = ts_aware.isoformat()
-        ist_offset = timezone(timedelta(hours=5, minutes=30))
         ist_str = ts_aware.astimezone(ist_offset).strftime("%d-%b-%Y %I:%M:%S %p IST")
+    else:
+        new_reading = Reading(
+            device_id=device_id,
+            ts=upload_dt,
+            received_at=upload_dt,
+            fw_ver=device.fw_ver,
+            raw={"machine_screen": screen_record}
+        )
+        db.add(new_reading)
 
     db.commit()
 

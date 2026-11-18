@@ -154,6 +154,47 @@ def download_existing_report(report_id: int, db: Session = Depends(get_db), user
     )
 
 
+@router.delete("/{report_id}")
+def delete_report(report_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Delete a generated report file from server disk storage and remove its database record."""
+    report = db.query(Report).filter(Report.id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    require_device_access(user, report.device_id, db)
+
+    file_path = report.file_path
+    report_no = report.report_no
+    db.delete(report)
+    db.commit()
+
+    if file_path and os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except OSError as exc:
+            logger.warning("Failed to remove report file %s: %s", file_path, exc)
+
+    return {"success": True, "deleted_id": report_id, "report_no": report_no}
+
+
+@router.delete("/history/{device_id}")
+def delete_all_device_reports(device_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Delete all archived reports for a device from server disk storage and database."""
+    require_device_access(user, device_id, db)
+    reports = db.query(Report).filter(Report.device_id == device_id).all()
+    deleted_count = 0
+    for rep in reports:
+        f_path = rep.file_path
+        db.delete(rep)
+        deleted_count += 1
+        if f_path and os.path.exists(f_path):
+            try:
+                os.remove(f_path)
+            except OSError as exc:
+                logger.warning("Failed to remove report file %s: %s", f_path, exc)
+    db.commit()
+    return {"success": True, "deleted_count": deleted_count}
+
+
 @router.get("/raw-data")
 def download_raw_data(
     device_id: str = Query(...),

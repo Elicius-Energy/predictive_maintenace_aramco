@@ -28,7 +28,7 @@ class QueryService:
 
         latest = (
             db.query(Reading)
-            .filter(Reading.device_id == device_id)
+            .filter(Reading.device_id == device_id, Reading.t_kw.isnot(None))
             .order_by(desc(Reading.ts))
             .first()
         )
@@ -170,9 +170,10 @@ class QueryService:
         latest_screen = None
         for r_ts, r_raw in recent_rows:
             if isinstance(r_raw, dict) and r_raw.get("machine_screen"):
+                ms_obj = r_raw["machine_screen"]
                 latest_screen = {
-                    **r_raw["machine_screen"],
-                    "ts": r_ts.isoformat()
+                    **ms_obj,
+                    "ts": ms_obj.get("uploaded_at") or r_ts.isoformat()
                 }
                 break
         cards["latest_machine_screen"] = latest_screen
@@ -279,9 +280,12 @@ class QueryService:
                     "machine_screen": None
                 })
             else:
-                avg_kw = sum(v["t_kw"] for v in vals if v["t_kw"] is not None) / max(len(vals), 1)
-                b_kwh = avg_kw * (interval_seconds / 3600.0)
-                prev_cum_kwh += b_kwh
+                avg_kw = self._avg([v.get("t_kw") for v in vals])
+                if avg_kw is not None:
+                    b_kwh = avg_kw * (interval_seconds / 3600.0)
+                    prev_cum_kwh += b_kwh
+                else:
+                    b_kwh = None
 
                 vll_avg = self._avg([v.get("vll_avg") for v in vals])
                 vln_avg = self._avg([v.get("vln_avg") for v in vals])
@@ -328,9 +332,9 @@ class QueryService:
 
                 points.append({
                     "ts": dt_str,
-                    "kwh": round(b_kwh, 3),
+                    "kwh": round(b_kwh, 3) if b_kwh is not None else None,
                     "cum_kwh": round(prev_cum_kwh, 3),
-                    "kw": round(avg_kw, 2),
+                    "kw": round(avg_kw, 2) if avg_kw is not None else None,
                     "kw1": kw1_val,
                     "kw2": kw2_val,
                     "kw3": kw3_val,
