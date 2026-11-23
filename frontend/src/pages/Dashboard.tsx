@@ -1047,73 +1047,79 @@ export const Dashboard: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
-              {/* Machine Screen Upload + Camera */}
-              <PhotoCaptureControls
-                label="Machine Screen"
-                loading={uploadingScreen}
-                loadingLabel="Reading Screen..."
-                variant="indigo"
-                onFileSelected={handleScreenFileSelected}
-                uploadTriggerRef={screenUploadTriggerRef}
-                cameraTriggerRef={screenCameraTriggerRef}
-                title="Upload or capture a photo of the machine HMI screen to extract parameters via AI OCR"
-              />
-
-              {/* Motor Nameplate Upload + Camera */}
-              <PhotoCaptureControls
-                label="Motor Nameplate"
-                loading={uploadingNameplate}
-                loadingLabel="Reading Nameplate..."
-                variant="teal"
-                onFileSelected={handleNameplateFileSelected}
-                uploadTriggerRef={nameplateUploadTriggerRef}
-                cameraTriggerRef={nameplateCameraTriggerRef}
-                title="Upload or capture a photo of the motor nameplate to extract motor specs via AI OCR"
-              />
-
-              {/* Temperature Input */}
-              <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2.5 py-1 shadow-2xs">
-                <Thermometer className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                <span className="text-xs text-slate-500 font-semibold">Temp:</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  placeholder="e.g. 52.5"
-                  value={inputTemp}
-                  onChange={(e) => { setInputTemp(e.target.value); setManualSuccessMsg(null); setManualErrorMsg(null); }}
-                  className="w-16 bg-transparent text-xs font-bold text-slate-800 focus:outline-hidden"
+              {/* Photo / OCR Controls Group */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Machine Screen Upload + Camera */}
+                <PhotoCaptureControls
+                  label="Machine Screen"
+                  loading={uploadingScreen}
+                  loadingLabel="Reading Screen..."
+                  variant="indigo"
+                  onFileSelected={handleScreenFileSelected}
+                  uploadTriggerRef={screenUploadTriggerRef}
+                  cameraTriggerRef={screenCameraTriggerRef}
+                  title="Upload or capture a photo of the machine HMI screen to extract parameters via AI OCR"
                 />
-                <span className="text-[10px] text-slate-400 font-bold">°C</span>
+
+                {/* Motor Nameplate Upload + Camera */}
+                <PhotoCaptureControls
+                  label="Motor Nameplate"
+                  loading={uploadingNameplate}
+                  loadingLabel="Reading Nameplate..."
+                  variant="teal"
+                  onFileSelected={handleNameplateFileSelected}
+                  uploadTriggerRef={nameplateUploadTriggerRef}
+                  cameraTriggerRef={nameplateCameraTriggerRef}
+                  title="Upload or capture a photo of the motor nameplate to extract motor specs via AI OCR"
+                />
               </div>
 
-              {/* RPM Input */}
-              <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2.5 py-1 shadow-2xs">
-                <RotateCw className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                <span className="text-xs text-slate-500 font-semibold">RPM:</span>
-                <input
-                  type="number"
-                  step="1"
-                  placeholder="e.g. 1480"
-                  value={inputRpm}
-                  onChange={(e) => { setInputRpm(e.target.value); setManualSuccessMsg(null); setManualErrorMsg(null); }}
-                  className="w-16 bg-transparent text-xs font-bold text-slate-800 focus:outline-hidden"
-                />
-                <span className="text-[10px] text-slate-400 font-bold">RPM</span>
-              </div>
+              {/* Manual Temp + RPM + Record Group (kept together cleanly) */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Temperature Input */}
+                <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 shadow-2xs">
+                  <Thermometer className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                  <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">Temp:</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    placeholder="e.g. 52.5"
+                    value={inputTemp}
+                    onChange={(e) => { setInputTemp(e.target.value); setManualSuccessMsg(null); setManualErrorMsg(null); }}
+                    className="w-20 bg-transparent text-xs font-bold text-slate-800 focus:outline-hidden [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <span className="text-[10px] text-slate-400 font-bold shrink-0">°C</span>
+                </div>
 
-              {/* Record Button */}
-              <button
-                onClick={handleRecordManualReadings}
-                disabled={recordingManual || !inputTemp.trim() || !inputRpm.trim()}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1F3A8A] hover:bg-blue-900 disabled:opacity-40 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs"
-              >
-                {recordingManual ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Check className="w-3.5 h-3.5" />
-                )}
-                <span>Record</span>
-              </button>
+                {/* RPM Input */}
+                <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 shadow-2xs">
+                  <RotateCw className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                  <span className="text-xs text-slate-500 font-semibold whitespace-nowrap">RPM:</span>
+                  <input
+                    type="number"
+                    step="1"
+                    placeholder="e.g. 1480"
+                    value={inputRpm}
+                    onChange={(e) => { setInputRpm(e.target.value); setManualSuccessMsg(null); setManualErrorMsg(null); }}
+                    className="w-20 bg-transparent text-xs font-bold text-slate-800 focus:outline-hidden [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <span className="text-[10px] text-slate-400 font-bold shrink-0">RPM</span>
+                </div>
+
+                {/* Record Button */}
+                <button
+                  onClick={handleRecordManualReadings}
+                  disabled={recordingManual || !inputTemp.trim() || !inputRpm.trim()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1F3A8A] hover:bg-blue-900 disabled:opacity-40 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs shrink-0"
+                >
+                  {recordingManual ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5" />
+                  )}
+                  <span>Record</span>
+                </button>
+              </div>
             </div>
           </div>
 
