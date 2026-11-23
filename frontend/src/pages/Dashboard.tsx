@@ -3,7 +3,8 @@ import axios from 'axios';
 import { useDevice } from '../contexts/DeviceContext';
 import {
   Activity, Zap, Gauge, Flame, Clock, RefreshCw, AlertTriangle,
-  CheckCircle2, WifiOff, AlertCircle, Loader2, Thermometer, RotateCw, Check, Camera
+  CheckCircle2, WifiOff, AlertCircle, Loader2, Thermometer, RotateCw, Check, Camera,
+  Upload, Play, Square, Timer, RotateCcw
 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
@@ -12,11 +13,25 @@ import {
 } from 'recharts';
 import { SmartRoiSection } from '../components/dashboard/SmartRoiSection';
 import { TimeInputWithAmPm } from '../components/common/TimeInputWithAmPm';
+import { PhotoCaptureControls } from '../components/common/PhotoCaptureControls';
 import {
   uploadMachineScreenImage,
+  uploadMotorNameplateImage,
   type MachineScreenOcrResponse,
-  type MachineScreenExtracted
+  type MachineScreenExtracted,
+  type MotorNameplateExtracted,
+  type MotorNameplateOcrResponse
 } from '../utils/machineScreenOcr';
+import {
+  getPowerStudy,
+  startPowerStudy,
+  stopPowerStudy,
+  resetPowerStudy,
+  mergeConfigDraft,
+  getLatestNameplate,
+  saveLatestNameplate,
+  type PowerStudySession
+} from '../utils/sessionPersistence';
 
 export const Dashboard: React.FC = () => {
   const { devices, selectedDevice, selectedDeviceId, getStatusColor } = useDevice();
@@ -300,11 +315,84 @@ export const Dashboard: React.FC = () => {
   const [manualErrorMsg, setManualErrorMsg] = useState<string | null>(null);
   const [latestManual, setLatestManual] = useState<any>(null);
 
-  // Machine HMI Screen OCR Upload state
-  const screenFileInputRef = useRef<HTMLInputElement | null>(null);
+  // Machine HMI Screen & Motor Nameplate OCR Upload/Camera state
+  const screenUploadTriggerRef = useRef<(() => void) | null>(null);
+  const screenCameraTriggerRef = useRef<(() => void) | null>(null);
+  const nameplateUploadTriggerRef = useRef<(() => void) | null>(null);
+  const nameplateCameraTriggerRef = useRef<(() => void) | null>(null);
   const [uploadingScreen, setUploadingScreen] = useState<boolean>(false);
+  const [uploadingNameplate, setUploadingNameplate] = useState<boolean>(false);
   const [latestMachineScreen, setLatestMachineScreen] = useState<MachineScreenExtracted | null>(null);
-  const [screenOcrModal, setScreenOcrModal] = useState<MachineScreenOcrResponse | null>(null);
+  const [latestMotorNameplate, setLatestMotorNameplate] = useState<MotorNameplateExtracted | null>(null);
+  const [ocrModal, setOcrModal] = useState<{
+    kind: 'screen' | 'nameplate';
+    res: MachineScreenOcrResponse | MotorNameplateOcrResponse;
+  } | null>(null);
+
+  // Power Study Stopwatch state (persisted per device until logout)
+  const [studySession, setStudySession] = useState<PowerStudySession | null>(null);
+  const [studyElapsedSec, setStudyElapsedSec] = useState<number>(0);
+
+  useEffect(() => {
+    setStudySession(getPowerStudy(selectedDeviceId));
+    setLatestMotorNameplate(getLatestNameplate(selectedDeviceId) as MotorNameplateExtracted | null);
+  }, [selectedDeviceId]);
+
+  useEffect(() => {
+    if (!studySession) {
+      setStudyElapsedSec(0);
+      return;
+    }
+    const computeElapsed = () => {
+      const startMs = new Date(studySession.startedAt).getTime();
+      const endMs = studySession.stoppedAt ? new Date(studySession.stoppedAt).getTime() : Date.now();
+      return Math.max(0, Math.floor((endMs - startMs) / 1000));
+    };
+    setStudyElapsedSec(computeElapsed());
+    if (studySession.status !== 'running') return;
+    const id = window.setInterval(() => {
+      setStudyElapsedSec(computeElapsed());
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [studySession]);
+
+  const formatStopwatch = (totalSeconds: number) => {
+    const hrs = Math.floor(totalSeconds / 3600);
+    const mins = Math.floor((totalSeconds % 3600) / 60);
+    const secs = totalSeconds % 60;
+    return [hrs, mins, secs].map((n) => String(n).padStart(2, '0')).join(':');
+  };
+
+  const handleStartStudy = () => {
+    if (!selectedDeviceId) return;
+    const started = startPowerStudy(selectedDeviceId);
+    setStudySession(started);
+    setManualErrorMsg(null);
+    setManualSuccessMsg(`Power study started at ${formatIstTimeOnly(started.startedAt)}. Click "Stop Study" when finished.`);
+  };
+
+  const handleStopStudy = () => {
+    if (!selectedDeviceId) return;
+    const stopped = stopPowerStudy(selectedDeviceId);
+    if (stopped) {
+      setStudySession(stopped);
+      const elapsed = Math.max(
+        0,
+        Math.floor((new Date(stopped.stoppedAt || Date.now()).getTime() - new Date(stopped.startedAt).getTime()) / 1000)
+      );
+      setManualErrorMsg(null);
+      setManualSuccessMsg(
+        `Power study stopped (${formatStopwatch(elapsed)}). This study period is now set as the default on the Reports page.`
+      );
+    }
+  };
+
+  const handleResetStudy = () => {
+    if (!selectedDeviceId) return;
+    resetPowerStudy(selectedDeviceId);
+    setStudySession(null);
+    setStudyElapsedSec(0);
+  };
 
   // 1. Polling for Live Cards (every 5 seconds)
   const fetchLive = async () => {
@@ -439,16 +527,13 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const handleScreenUploadChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    // Immediately clear input so the browser does not retain the image File in memory
-    e.target.value = '';
+  const handleScreenFileSelected = async (file: File) => {
     if (!file || !selectedDeviceId) return;
 
     setUploadingScreen(true);
     setManualSuccessMsg(null);
     setManualErrorMsg(null);
-    setScreenOcrModal(null);
+    setOcrModal(null);
 
     try {
       const targetIso = new Date().toISOString();
@@ -459,18 +544,57 @@ export const Dashboard: React.FC = () => {
           ...res.extracted,
           ts: res.matched_timestamp || targetIso,
         });
+        if (res.profile_updated) {
+          mergeConfigDraft(selectedDeviceId, res.profile_updated);
+        }
         setManualSuccessMsg(res.message || 'Machine screen OCR data extracted and saved.');
         fetchTrendsAndSummary(false);
       }
 
       if (!res.success || res.needs_reupload) {
-        setScreenOcrModal(res);
+        setOcrModal({ kind: 'screen', res });
       }
     } catch (err: any) {
       console.error('Error uploading machine screen:', err);
       setManualErrorMsg(err.response?.data?.detail || err.message || 'Failed to process machine screen image.');
     } finally {
       setUploadingScreen(false);
+    }
+  };
+
+  const handleNameplateFileSelected = async (file: File) => {
+    if (!file || !selectedDeviceId) return;
+
+    setUploadingNameplate(true);
+    setManualSuccessMsg(null);
+    setManualErrorMsg(null);
+    setOcrModal(null);
+
+    try {
+      const targetIso = new Date().toISOString();
+      const res = await uploadMotorNameplateImage(selectedDeviceId, file, targetIso);
+
+      if (res.success) {
+        const extractedWithTs = {
+          ...res.extracted,
+          ts: res.matched_timestamp || targetIso,
+        };
+        setLatestMotorNameplate(extractedWithTs);
+        saveLatestNameplate(selectedDeviceId, extractedWithTs);
+        if (res.profile_updated) {
+          mergeConfigDraft(selectedDeviceId, res.profile_updated);
+        }
+        setManualSuccessMsg(res.message || 'Motor nameplate OCR data extracted and saved.');
+      }
+
+      if (!res.success || res.needs_reupload) {
+        setOcrModal({ kind: 'nameplate', res });
+      }
+    } catch (err: any) {
+      console.error('Error uploading motor nameplate:', err);
+      setManualErrorMsg(err.response?.data?.detail || err.message || 'Failed to process motor nameplate image.');
+    } finally {
+      setUploadingNameplate(false);
     }
   };
 
@@ -876,108 +1000,193 @@ export const Dashboard: React.FC = () => {
 
         </div>
 
-        {/* ── MANUAL MOTOR MEASUREMENTS: Temperature & RPM ─────────────── */}
-        <div className="p-3 bg-gradient-to-r from-slate-50 via-blue-50/25 to-slate-50 border border-slate-200/90 rounded-xl flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-blue-100/70 text-[#1F3A8A] flex items-center justify-center shrink-0">
-              <Thermometer className="w-4 h-4 text-rose-500" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-bold text-slate-800">Manual Motor & Machine Screen Measurements</span>
-                {latestManual && (
-                  <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">
-                    Motor: {latestManual.temperature} °C • {latestManual.rpm} RPM ({formatIstDateTime(latestManual.ts)})
-                  </span>
-                )}
-                {latestMachineScreen && (
-                  <span className="text-[10px] bg-indigo-50 text-indigo-800 border border-indigo-200 px-2 py-0.5 rounded-full font-semibold">
-                    Screen: {[
-                      latestMachineScreen.machine_model_no || latestMachineScreen.machine_name,
-                      latestMachineScreen.count_ne != null ? `${latestMachineScreen.count_ne} Ne` : null,
-                      latestMachineScreen.spindle_rpm != null ? `${latestMachineScreen.spindle_rpm} RPM` : null,
-                      latestMachineScreen.tpi != null ? `TPI ${latestMachineScreen.tpi}` : null,
-                      latestMachineScreen.doff_time_min != null ? `Doff ${latestMachineScreen.doff_time_min}m` : null,
-                    ].filter(Boolean).join(' • ')}
-                    {latestMachineScreen.ts ? ` (${formatIstDateTime(latestMachineScreen.ts)})` : ''}
-                  </span>
-                )}
+        {/* ── MANUAL MOTOR MEASUREMENTS & POWER STUDY STOPWATCH ────────── */}
+        <div className="p-3 bg-gradient-to-r from-slate-50 via-blue-50/25 to-slate-50 border border-slate-200/90 rounded-xl flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+          {/* Left: Manual Measurements + Machine Screen & Motor Nameplate Photo/OCR */}
+          <div className="flex-1 min-w-0 space-y-2.5">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-blue-100/70 text-[#1F3A8A] flex items-center justify-center shrink-0">
+                <Thermometer className="w-4 h-4 text-rose-500" />
               </div>
-              <p className="text-[11px] text-slate-500">
-                Enter on-site temperature & RPM or upload a machine HMI screen photo (OCR) to record onto the nearest timestamp row.
-              </p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-bold text-slate-800">Manual Motor & Machine Screen Measurements</span>
+                  {latestManual && (
+                    <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">
+                      Motor: {latestManual.temperature} °C • {latestManual.rpm} RPM ({formatIstDateTime(latestManual.ts)})
+                    </span>
+                  )}
+                  {latestMachineScreen && (
+                    <span className="text-[10px] bg-indigo-50 text-indigo-800 border border-indigo-200 px-2 py-0.5 rounded-full font-semibold">
+                      Screen: {[
+                        latestMachineScreen.machine_model_no || latestMachineScreen.machine_name,
+                        latestMachineScreen.count_ne != null ? `${latestMachineScreen.count_ne} Ne` : null,
+                        latestMachineScreen.spindle_rpm != null ? `${latestMachineScreen.spindle_rpm} RPM` : null,
+                        latestMachineScreen.tpi != null ? `TPI ${latestMachineScreen.tpi}` : null,
+                        latestMachineScreen.doff_time_min != null ? `Doff ${latestMachineScreen.doff_time_min}m` : null,
+                      ].filter(Boolean).join(' • ')}
+                      {latestMachineScreen.ts ? ` (${formatIstDateTime(latestMachineScreen.ts)})` : ''}
+                    </span>
+                  )}
+                  {latestMotorNameplate && (
+                    <span className="text-[10px] bg-teal-50 text-teal-800 border border-teal-200 px-2 py-0.5 rounded-full font-semibold">
+                      Nameplate: {[
+                        latestMotorNameplate.motor_make,
+                        latestMotorNameplate.motor_rating_kw != null ? `${latestMotorNameplate.motor_rating_kw} kW` : null,
+                        latestMotorNameplate.rated_voltage != null ? `${latestMotorNameplate.rated_voltage} V` : null,
+                        latestMotorNameplate.rated_current_amps != null ? `${latestMotorNameplate.rated_current_amps} A` : null,
+                        latestMotorNameplate.rated_efficiency_pct != null ? `${latestMotorNameplate.rated_efficiency_pct}%` : null,
+                      ].filter(Boolean).join(' • ')}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Enter on-site temperature & RPM, or upload/capture photos of the machine HMI screen & motor nameplate (OCR).
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Machine Screen Upload + Camera */}
+              <PhotoCaptureControls
+                label="Machine Screen"
+                loading={uploadingScreen}
+                loadingLabel="Reading Screen..."
+                variant="indigo"
+                onFileSelected={handleScreenFileSelected}
+                uploadTriggerRef={screenUploadTriggerRef}
+                cameraTriggerRef={screenCameraTriggerRef}
+                title="Upload or capture a photo of the machine HMI screen to extract parameters via AI OCR"
+              />
+
+              {/* Motor Nameplate Upload + Camera */}
+              <PhotoCaptureControls
+                label="Motor Nameplate"
+                loading={uploadingNameplate}
+                loadingLabel="Reading Nameplate..."
+                variant="teal"
+                onFileSelected={handleNameplateFileSelected}
+                uploadTriggerRef={nameplateUploadTriggerRef}
+                cameraTriggerRef={nameplateCameraTriggerRef}
+                title="Upload or capture a photo of the motor nameplate to extract motor specs via AI OCR"
+              />
+
+              {/* Temperature Input */}
+              <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2.5 py-1 shadow-2xs">
+                <Thermometer className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                <span className="text-xs text-slate-500 font-semibold">Temp:</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  placeholder="e.g. 52.5"
+                  value={inputTemp}
+                  onChange={(e) => { setInputTemp(e.target.value); setManualSuccessMsg(null); setManualErrorMsg(null); }}
+                  className="w-16 bg-transparent text-xs font-bold text-slate-800 focus:outline-hidden"
+                />
+                <span className="text-[10px] text-slate-400 font-bold">°C</span>
+              </div>
+
+              {/* RPM Input */}
+              <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2.5 py-1 shadow-2xs">
+                <RotateCw className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                <span className="text-xs text-slate-500 font-semibold">RPM:</span>
+                <input
+                  type="number"
+                  step="1"
+                  placeholder="e.g. 1480"
+                  value={inputRpm}
+                  onChange={(e) => { setInputRpm(e.target.value); setManualSuccessMsg(null); setManualErrorMsg(null); }}
+                  className="w-16 bg-transparent text-xs font-bold text-slate-800 focus:outline-hidden"
+                />
+                <span className="text-[10px] text-slate-400 font-bold">RPM</span>
+              </div>
+
+              {/* Record Button */}
+              <button
+                onClick={handleRecordManualReadings}
+                disabled={recordingManual || !inputTemp.trim() || !inputRpm.trim()}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1F3A8A] hover:bg-blue-900 disabled:opacity-40 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs"
+              >
+                {recordingManual ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" />
+                )}
+                <span>Record</span>
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5 flex-wrap">
-            {/* Hidden file input for Machine Screen OCR */}
-            <input
-              ref={screenFileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleScreenUploadChange}
-              className="hidden"
-            />
+          {/* Right: Power Study Stopwatch */}
+          <div className="xl:border-l xl:border-slate-200 xl:pl-3.5 pt-2.5 xl:pt-0 border-t xl:border-t-0 border-slate-200/80 shrink-0">
+            <div className={`rounded-xl border px-3 py-2 flex items-center justify-between gap-3 transition-colors ${
+              studySession?.status === 'running'
+                ? 'bg-emerald-50/90 border-emerald-300'
+                : studySession?.status === 'completed'
+                ? 'bg-blue-50/80 border-blue-200'
+                : 'bg-white border-slate-200'
+            }`}>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  {studySession?.status === 'running' ? (
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
+                  ) : (
+                    <Timer className="w-3.5 h-3.5 text-[#1F3A8A] shrink-0" />
+                  )}
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600">
+                    {studySession?.status === 'running'
+                      ? 'Study Running'
+                      : studySession?.status === 'completed'
+                      ? 'Study Recorded'
+                      : 'Power Study'}
+                  </span>
+                </div>
+                <div className="font-mono text-base font-extrabold text-slate-900 leading-tight mt-0.5">
+                  {formatStopwatch(studyElapsedSec)}
+                </div>
+                {studySession && (
+                  <div className="text-[10px] text-slate-500 font-medium truncate">
+                    {studySession.status === 'running'
+                      ? `From ${formatIstTimeOnly(studySession.startedAt)}`
+                      : `${formatIstTimeOnly(studySession.startedAt)} – ${formatIstTimeOnly(studySession.stoppedAt || '')}`}
+                  </div>
+                )}
+              </div>
 
-            {/* Upload Machine Screen Button */}
-            <button
-              type="button"
-              onClick={() => screenFileInputRef.current?.click()}
-              disabled={uploadingScreen}
-              title="Upload photo of the machine screen to extract parameters via AI OCR and populate configuration & data row"
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs"
-            >
-              {uploadingScreen ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Camera className="w-3.5 h-3.5" />
-              )}
-              <span>{uploadingScreen ? 'Reading Screen...' : 'Upload Machine Screen'}</span>
-            </button>
-
-            {/* Temperature Input */}
-            <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2.5 py-1 shadow-2xs">
-              <Thermometer className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-              <span className="text-xs text-slate-500 font-semibold">Temp:</span>
-              <input
-                type="number"
-                step="0.1"
-                placeholder="e.g. 52.5"
-                value={inputTemp}
-                onChange={(e) => { setInputTemp(e.target.value); setManualSuccessMsg(null); setManualErrorMsg(null); }}
-                className="w-20 bg-transparent text-xs font-bold text-slate-800 focus:outline-hidden"
-              />
-              <span className="text-[10px] text-slate-400 font-bold">°C</span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {studySession?.status === 'running' ? (
+                  <button
+                    type="button"
+                    onClick={handleStopStudy}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                  >
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                    <span>Stop Study</span>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleStartStudy}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>{studySession?.status === 'completed' ? 'New Study' : 'Start Study'}</span>
+                    </button>
+                    {studySession?.status === 'completed' && (
+                      <button
+                        type="button"
+                        onClick={handleResetStudy}
+                        title="Clear recorded study"
+                        className="p-2 rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
-
-            {/* RPM Input */}
-            <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2.5 py-1 shadow-2xs">
-              <RotateCw className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-              <span className="text-xs text-slate-500 font-semibold">RPM:</span>
-              <input
-                type="number"
-                step="1"
-                placeholder="e.g. 1480"
-                value={inputRpm}
-                onChange={(e) => { setInputRpm(e.target.value); setManualSuccessMsg(null); setManualErrorMsg(null); }}
-                className="w-20 bg-transparent text-xs font-bold text-slate-800 focus:outline-hidden"
-              />
-              <span className="text-[10px] text-slate-400 font-bold">RPM</span>
-            </div>
-
-            {/* Record Button */}
-            <button
-              onClick={handleRecordManualReadings}
-              disabled={recordingManual || !inputTemp.trim() || !inputRpm.trim()}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#1F3A8A] hover:bg-blue-900 disabled:opacity-40 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shadow-xs"
-            >
-              {recordingManual ? (
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Check className="w-3.5 h-3.5" />
-              )}
-              <span>Record</span>
-            </button>
           </div>
         </div>
 
@@ -1395,49 +1604,49 @@ export const Dashboard: React.FC = () => {
         <SmartRoiSection deviceId={selectedDeviceId} />
       )}
 
-      {/* ── MACHINE SCREEN OCR CLARITY / RE-UPLOAD POP-UP MODAL ─────────── */}
-      {screenOcrModal && (
+      {/* ── OCR CLARITY / RE-UPLOAD POP-UP MODAL (Machine Screen & Motor Nameplate) ── */}
+      {ocrModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-md w-full p-5 space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2.5">
                 <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                  screenOcrModal.success ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
+                  ocrModal.res.success ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
                 }`}>
                   <AlertTriangle className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-900">
-                    {screenOcrModal.success
-                      ? 'Some Screen Values Were Unclear'
-                      : 'Machine Screen Image Unclear'}
+                    {ocrModal.res.success
+                      ? `Some ${ocrModal.kind === 'nameplate' ? 'Nameplate' : 'Screen'} Values Were Unclear`
+                      : `${ocrModal.kind === 'nameplate' ? 'Motor Nameplate' : 'Machine Screen'} Image Unclear`}
                   </h3>
                   <p className="text-xs text-slate-500">
-                    {screenOcrModal.success
+                    {ocrModal.res.success
                       ? 'Clear values were saved; unclear fields were left empty.'
-                      : 'No data was written because the screen could not be read clearly.'}
+                      : 'No data was written because the image could not be read clearly.'}
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => setScreenOcrModal(null)}
+                onClick={() => setOcrModal(null)}
                 className="text-slate-400 hover:text-slate-600 text-lg font-bold leading-none cursor-pointer"
               >
                 ×
               </button>
             </div>
 
-            {screenOcrModal.reason && (
+            {ocrModal.res.reason && (
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700">
-                {screenOcrModal.reason}
+                {ocrModal.res.reason}
               </div>
             )}
 
-            {screenOcrModal.unclear_fields && screenOcrModal.unclear_fields.length > 0 && (
+            {ocrModal.res.unclear_fields && ocrModal.res.unclear_fields.length > 0 && (
               <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1">
                 <div className="font-bold">Fields left empty (unclear in photo):</div>
                 <div className="flex flex-wrap gap-1.5 pt-1">
-                  {screenOcrModal.unclear_fields.map((f, idx) => (
+                  {ocrModal.res.unclear_fields.map((f, idx) => (
                     <span key={idx} className="px-2 py-0.5 rounded bg-white border border-amber-300 font-semibold text-[11px]">
                       {f}
                     </span>
@@ -1446,24 +1655,39 @@ export const Dashboard: React.FC = () => {
               </div>
             )}
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => setScreenOcrModal(null)}
-                className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                onClick={() => setOcrModal(null)}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
               >
-                {screenOcrModal.success ? 'Keep Current Data' : 'Cancel'}
+                {ocrModal.res.success ? 'Keep Current Data' : 'Cancel'}
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  setScreenOcrModal(null);
-                  screenFileInputRef.current?.click();
+                  const kind = ocrModal.kind;
+                  setOcrModal(null);
+                  if (kind === 'nameplate') nameplateUploadTriggerRef.current?.();
+                  else screenUploadTriggerRef.current?.();
                 }}
-                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-[#1F3A8A] hover:bg-blue-900 text-white text-xs font-bold cursor-pointer shadow-xs"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold cursor-pointer"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>Re-upload</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const kind = ocrModal.kind;
+                  setOcrModal(null);
+                  if (kind === 'nameplate') nameplateCameraTriggerRef.current?.();
+                  else screenCameraTriggerRef.current?.();
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#1F3A8A] hover:bg-blue-900 text-white text-xs font-bold cursor-pointer shadow-xs"
               >
                 <Camera className="w-3.5 h-3.5" />
-                <span>Re-upload Clearer Photo</span>
+                <span>Retake Photo</span>
               </button>
             </div>
           </div>

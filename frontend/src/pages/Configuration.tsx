@@ -4,12 +4,21 @@ import { useDevice } from '../contexts/DeviceContext';
 import {
   Save, CheckCircle2, AlertCircle, ChevronDown, ChevronUp,
   Cpu, Building, Zap, Cog, Activity, UserCheck, ShieldCheck,
-  IndianRupee, Sliders, Plus, Trash2, Camera, Loader2, AlertTriangle
+  IndianRupee, Sliders, Plus, Trash2, Camera, AlertTriangle, Upload, RotateCcw
 } from 'lucide-react';
+import { PhotoCaptureControls } from '../components/common/PhotoCaptureControls';
 import {
   uploadMachineScreenImage,
-  type MachineScreenOcrResponse
+  uploadMotorNameplateImage,
+  type MachineScreenOcrResponse,
+  type MotorNameplateOcrResponse
 } from '../utils/machineScreenOcr';
+import {
+  getConfigDraft,
+  saveConfigDraft,
+  clearConfigDraft,
+  saveLatestNameplate
+} from '../utils/sessionPersistence';
 
 export const Configuration: React.FC = () => {
   const { selectedDeviceId, refreshDevices } = useDevice();
@@ -24,37 +33,90 @@ export const Configuration: React.FC = () => {
   const [regAlias, setRegAlias] = useState('');
   const [registering, setRegistering] = useState(false);
 
-  // Machine Screen OCR Upload state
-  const screenFileInputRef = useRef<HTMLInputElement | null>(null);
+  // Machine Screen & Motor Nameplate OCR Upload/Camera state
+  const screenUploadTriggerRef = useRef<(() => void) | null>(null);
+  const screenCameraTriggerRef = useRef<(() => void) | null>(null);
+  const nameplateUploadTriggerRef = useRef<(() => void) | null>(null);
+  const nameplateCameraTriggerRef = useRef<(() => void) | null>(null);
   const [uploadingScreen, setUploadingScreen] = useState(false);
-  const [screenOcrModal, setScreenOcrModal] = useState<MachineScreenOcrResponse | null>(null);
+  const [uploadingNameplate, setUploadingNameplate] = useState(false);
+  const [ocrModal, setOcrModal] = useState<{
+    kind: 'screen' | 'nameplate';
+    res: MachineScreenOcrResponse | MotorNameplateOcrResponse;
+  } | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const savedProfileRef = useRef<any>(null);
 
-  const handleScreenUploadChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
+  const handleScreenFileSelected = async (file: File) => {
     if (!file || !selectedDeviceId) return;
 
     setUploadingScreen(true);
     setBaselineSuccess(null);
     setErrorMessage(null);
-    setScreenOcrModal(null);
+    setOcrModal(null);
 
     try {
       const res = await uploadMachineScreenImage(selectedDeviceId, file);
       if (res.success && res.profile_updated) {
-        setProfile((prev: any) => ({
-          ...(prev || {}),
-          ...res.profile_updated,
-        }));
+        setProfile((prev: any) => {
+          const updated = {
+            ...(prev || {}),
+            ...res.profile_updated,
+          };
+          if (hasUnsavedChanges) {
+            saveConfigDraft(selectedDeviceId, updated);
+          }
+          return updated;
+        });
+        if (savedProfileRef.current) {
+          savedProfileRef.current = { ...savedProfileRef.current, ...res.profile_updated };
+        }
         setBaselineSuccess(res.message || 'Machine details populated from screen photo.');
       }
       if (!res.success || res.needs_reupload) {
-        setScreenOcrModal(res);
+        setOcrModal({ kind: 'screen', res });
       }
     } catch (err: any) {
       setErrorMessage(err.response?.data?.detail || err.message || 'Failed to read machine screen photo.');
     } finally {
       setUploadingScreen(false);
+    }
+  };
+
+  const handleNameplateFileSelected = async (file: File) => {
+    if (!file || !selectedDeviceId) return;
+
+    setUploadingNameplate(true);
+    setBaselineSuccess(null);
+    setErrorMessage(null);
+    setOcrModal(null);
+
+    try {
+      const res = await uploadMotorNameplateImage(selectedDeviceId, file);
+      if (res.success && res.profile_updated) {
+        setProfile((prev: any) => {
+          const updated = {
+            ...(prev || {}),
+            ...res.profile_updated,
+          };
+          if (hasUnsavedChanges) {
+            saveConfigDraft(selectedDeviceId, updated);
+          }
+          return updated;
+        });
+        if (savedProfileRef.current) {
+          savedProfileRef.current = { ...savedProfileRef.current, ...res.profile_updated };
+        }
+        saveLatestNameplate(selectedDeviceId, res.extracted);
+        setBaselineSuccess(res.message || 'Motor nameplate details populated from photo.');
+      }
+      if (!res.success || res.needs_reupload) {
+        setOcrModal({ kind: 'nameplate', res });
+      }
+    } catch (err: any) {
+      setErrorMessage(err.response?.data?.detail || err.message || 'Failed to read motor nameplate photo.');
+    } finally {
+      setUploadingNameplate(false);
     }
   };
 
@@ -79,6 +141,8 @@ export const Configuration: React.FC = () => {
     if (!selectedDeviceId) {
       setLoading(false);
       setProfile(null);
+      savedProfileRef.current = null;
+      setHasUnsavedChanges(false);
       setShowRegister(true);
       return;
     }
@@ -86,7 +150,15 @@ export const Configuration: React.FC = () => {
     setErrorMessage(null);
     try {
       const res = await axios.get(`/api/devices/${selectedDeviceId}/profile`, { withCredentials: true });
-      setProfile(res.data);
+      savedProfileRef.current = res.data;
+      const draft = getConfigDraft(selectedDeviceId);
+      if (draft) {
+        setProfile({ ...res.data, ...draft });
+        setHasUnsavedChanges(true);
+      } else {
+        setProfile(res.data);
+        setHasUnsavedChanges(false);
+      }
     } catch (err: any) {
       setErrorMessage(err.response?.data?.detail || 'Failed to load device profile');
     } finally {
@@ -99,14 +171,37 @@ export const Configuration: React.FC = () => {
   }, [selectedDeviceId]);
 
   const handleInputChange = (field: string, value: any) => {
-    setProfile((prev: any) => ({ ...prev, [field]: value }));
+    setProfile((prev: any) => {
+      const updated = { ...(prev || {}), [field]: value };
+      if (selectedDeviceId) {
+        saveConfigDraft(selectedDeviceId, updated);
+      }
+      return updated;
+    });
+    setHasUnsavedChanges(true);
   };
 
   const handleThresholdChange = (key: string, value: any) => {
-    setProfile((prev: any) => ({
-      ...prev,
-      thresholds: { ...(prev?.thresholds || {}), [key]: value },
-    }));
+    setProfile((prev: any) => {
+      const updated = {
+        ...(prev || {}),
+        thresholds: { ...(prev?.thresholds || {}), [key]: value },
+      };
+      if (selectedDeviceId) {
+        saveConfigDraft(selectedDeviceId, updated);
+      }
+      return updated;
+    });
+    setHasUnsavedChanges(true);
+  };
+
+  const handleDiscardDraft = () => {
+    if (!selectedDeviceId) return;
+    clearConfigDraft(selectedDeviceId);
+    if (savedProfileRef.current) {
+      setProfile(savedProfileRef.current);
+    }
+    setHasUnsavedChanges(false);
   };
 
   const handleSave = async (e?: React.FormEvent) => {
@@ -123,6 +218,9 @@ export const Configuration: React.FC = () => {
 
     try {
       await axios.put(`/api/devices/${selectedDeviceId}/profile`, profile, { withCredentials: true });
+      clearConfigDraft(selectedDeviceId);
+      savedProfileRef.current = profile;
+      setHasUnsavedChanges(false);
       setSaveSuccess(true);
       refreshDevices();
       setTimeout(() => setSaveSuccess(false), 4000);
@@ -484,7 +582,27 @@ export const Configuration: React.FC = () => {
           </button>
 
           {openSections.motor && (
-            <div className="p-5 border-t border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+            <div className="p-5 border-t border-slate-200 space-y-4 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-lg bg-teal-50/70 border border-teal-200/80">
+                <div>
+                  <div className="font-bold text-slate-800">Auto-Fill from Motor Nameplate</div>
+                  <div className="text-[11px] text-slate-500">
+                    Upload or take a photo of the motor nameplate to automatically extract Make, kW, Frame, Amps, RPM, Voltage, Efficiency, Connection, and Duty.
+                  </div>
+                </div>
+                <PhotoCaptureControls
+                  label="Motor Nameplate"
+                  loading={uploadingNameplate}
+                  loadingLabel="Extracting via OCR..."
+                  variant="teal"
+                  onFileSelected={handleNameplateFileSelected}
+                  uploadTriggerRef={nameplateUploadTriggerRef}
+                  cameraTriggerRef={nameplateCameraTriggerRef}
+                  title="Upload or capture a motor nameplate photo to auto-fill motor specifications"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Motor Make</label>
                 <input
@@ -588,6 +706,7 @@ export const Configuration: React.FC = () => {
                   className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
                 />
               </div>
+              </div>
             </div>
           )}
         </div>
@@ -612,31 +731,19 @@ export const Configuration: React.FC = () => {
                 <div>
                   <div className="font-bold text-slate-800">Auto-Fill from Machine HMI Screen</div>
                   <div className="text-[11px] text-slate-500">
-                    Upload a photo of the machine display to automatically extract and populate Make, Model, Count, Spindle RPM, TPI, and Doff Time.
+                    Upload or take a photo of the machine display to automatically extract and populate Make, Model, Count, Spindle RPM, TPI, and Doff Time.
                   </div>
                 </div>
-                <div>
-                  <input
-                    ref={screenFileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleScreenUploadChange}
-                    className="hidden"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => screenFileInputRef.current?.click()}
-                    disabled={uploadingScreen}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs transition-colors cursor-pointer shadow-xs"
-                  >
-                    {uploadingScreen ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Camera className="w-3.5 h-3.5" />
-                    )}
-                    <span>{uploadingScreen ? 'Extracting via OCR...' : 'Upload Machine Screen'}</span>
-                  </button>
-                </div>
+                <PhotoCaptureControls
+                  label="Machine Screen"
+                  loading={uploadingScreen}
+                  loadingLabel="Extracting via OCR..."
+                  variant="indigo"
+                  onFileSelected={handleScreenFileSelected}
+                  uploadTriggerRef={screenUploadTriggerRef}
+                  cameraTriggerRef={screenCameraTriggerRef}
+                  title="Upload or capture a machine HMI screen photo to auto-fill machine details"
+                />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1009,66 +1116,85 @@ export const Configuration: React.FC = () => {
         </div>
 
         {/* Sticky Save Footer */}
-        <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 py-3.5 px-4 shadow-lg flex items-center justify-between max-w-5xl mx-auto rounded-t-xl">
-          <div className="text-xs text-slate-500 font-medium">
-            Changes apply to <span className="font-semibold text-slate-700">{profile?.alias || selectedDeviceId}</span>
+        <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 backdrop-blur-md border-t border-slate-200 py-3.5 px-4 shadow-lg flex flex-wrap items-center justify-between gap-2 max-w-5xl mx-auto rounded-t-xl">
+          <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+            <span>
+              Changes apply to <span className="font-semibold text-slate-700">{profile?.alias || selectedDeviceId}</span>
+            </span>
+            {hasUnsavedChanges && (
+              <span className="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-amber-800 text-[11px] font-semibold">
+                Unsaved draft (kept until logout)
+              </span>
+            )}
           </div>
-          <button
-            type="submit"
-            disabled={saving}
-            className="inline-flex items-center gap-2 px-6 py-2 rounded-lg bg-[#1F3A8A] text-white font-semibold text-sm shadow-md hover:bg-[#1E3A8A] active:scale-95 disabled:opacity-50 transition-all cursor-pointer"
-          >
-            <Save className="w-4 h-4" />
-            <span>{saving ? 'Saving...' : 'Save All Settings'}</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {hasUnsavedChanges && (
+              <button
+                type="button"
+                onClick={handleDiscardDraft}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-100 font-semibold text-xs transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Discard Draft</span>
+              </button>
+            )}
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center gap-2 px-6 py-2 rounded-lg bg-[#1F3A8A] text-white font-semibold text-sm shadow-md hover:bg-[#1E3A8A] active:scale-95 disabled:opacity-50 transition-all cursor-pointer"
+            >
+              <Save className="w-4 h-4" />
+              <span>{saving ? 'Saving...' : 'Save All Settings'}</span>
+            </button>
+          </div>
         </div>
 
       </form>
 
-      {/* ── MACHINE SCREEN OCR CLARITY / RE-UPLOAD POP-UP MODAL ─────────── */}
-      {screenOcrModal && (
+      {/* ── OCR CLARITY / RE-UPLOAD POP-UP MODAL (Machine Screen & Motor Nameplate) ── */}
+      {ocrModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-md w-full p-5 space-y-4">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-2.5">
                 <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                  screenOcrModal.success ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
+                  ocrModal.res.success ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'
                 }`}>
                   <AlertTriangle className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-900">
-                    {screenOcrModal.success
-                      ? 'Some Screen Values Were Unclear'
-                      : 'Machine Screen Image Unclear'}
+                    {ocrModal.res.success
+                      ? `Some ${ocrModal.kind === 'nameplate' ? 'Nameplate' : 'Screen'} Values Were Unclear`
+                      : `${ocrModal.kind === 'nameplate' ? 'Motor Nameplate' : 'Machine Screen'} Image Unclear`}
                   </h3>
                   <p className="text-xs text-slate-500">
-                    {screenOcrModal.success
+                    {ocrModal.res.success
                       ? 'Clear values were populated; unclear fields were left empty.'
-                      : 'No data was populated because the screen could not be read clearly.'}
+                      : 'No data was populated because the image could not be read clearly.'}
                   </p>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => setScreenOcrModal(null)}
+                onClick={() => setOcrModal(null)}
                 className="text-slate-400 hover:text-slate-600 text-lg font-bold leading-none cursor-pointer"
               >
                 ×
               </button>
             </div>
 
-            {screenOcrModal.reason && (
+            {ocrModal.res.reason && (
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700">
-                {screenOcrModal.reason}
+                {ocrModal.res.reason}
               </div>
             )}
 
-            {screenOcrModal.unclear_fields && screenOcrModal.unclear_fields.length > 0 && (
+            {ocrModal.res.unclear_fields && ocrModal.res.unclear_fields.length > 0 && (
               <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1">
                 <div className="font-bold">Fields left empty (unclear in photo):</div>
                 <div className="flex flex-wrap gap-1.5 pt-1">
-                  {screenOcrModal.unclear_fields.map((f, idx) => (
+                  {ocrModal.res.unclear_fields.map((f, idx) => (
                     <span key={idx} className="px-2 py-0.5 rounded bg-white border border-amber-300 font-semibold text-[11px]">
                       {f}
                     </span>
@@ -1077,24 +1203,39 @@ export const Configuration: React.FC = () => {
               </div>
             )}
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => setScreenOcrModal(null)}
-                className="px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                onClick={() => setOcrModal(null)}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
               >
-                {screenOcrModal.success ? 'Keep Current Data' : 'Cancel'}
+                {ocrModal.res.success ? 'Keep Current Data' : 'Cancel'}
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  setScreenOcrModal(null);
-                  screenFileInputRef.current?.click();
+                  const kind = ocrModal.kind;
+                  setOcrModal(null);
+                  if (kind === 'nameplate') nameplateUploadTriggerRef.current?.();
+                  else screenUploadTriggerRef.current?.();
                 }}
-                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-[#1F3A8A] hover:bg-blue-900 text-white text-xs font-bold cursor-pointer shadow-xs"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold cursor-pointer"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>Re-upload</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const kind = ocrModal.kind;
+                  setOcrModal(null);
+                  if (kind === 'nameplate') nameplateCameraTriggerRef.current?.();
+                  else screenCameraTriggerRef.current?.();
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#1F3A8A] hover:bg-blue-900 text-white text-xs font-bold cursor-pointer shadow-xs"
               >
                 <Camera className="w-3.5 h-3.5" />
-                <span>Re-upload Clearer Photo</span>
+                <span>Retake Photo</span>
               </button>
             </div>
           </div>

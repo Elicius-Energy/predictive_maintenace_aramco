@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import axios from 'axios';
+import { clearAllSessionData } from '../utils/sessionPersistence';
 
 axios.interceptors.request.use((config) => {
   if (config.method && !['get', 'head', 'options'].includes(config.method.toLowerCase())) {
@@ -45,13 +46,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const clearDashboardSessionPrefs = () => {
-    try {
-      localStorage.removeItem('elicius_dashboard_period');
-      localStorage.removeItem('elicius_dashboard_active_params');
-      sessionStorage.removeItem('elicius_session_acked_alerts');
-    } catch {
-      // Ignore storage errors
-    }
+    clearAllSessionData();
   };
 
   const login = async (username: string, password: string, mfaCode?: string) => {

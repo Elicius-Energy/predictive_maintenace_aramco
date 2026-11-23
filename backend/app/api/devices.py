@@ -943,3 +943,253 @@ def upload_machine_screen(
     }
 
 
+@router.post("/{device_id}/upload-motor-nameplate")
+def upload_motor_nameplate(
+    device_id: str,
+    payload: MachineScreenOcrRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    """
+    Extract motor nameplate specifications via OpenAI Vision in-memory (no disk storage),
+    immediately release image bytes after OCR, and auto-update Motor Name Plate Details
+    in the device configuration profile.
+    """
+    import gc
+    import json
+    import re
+    from openai import OpenAI
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.config import settings
+    from app.services.rag_service import build_chat_completion_kwargs
+
+    require_device_access(user, device_id, db)
+
+    if not settings.OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key is not configured on the server.")
+
+    device = db.query(Device).filter(Device.device_id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    b64_data: Optional[str] = payload.image_base64 or ""
+    if "," in b64_data and b64_data.strip().startswith("data:"):
+        b64_data = b64_data.split(",", 1)[1]
+    b64_data = b64_data.strip()
+
+    if not b64_data:
+        raise HTTPException(status_code=400, detail="Empty image payload.")
+    if len(b64_data) > 10 * 1024 * 1024:
+        b64_data = None
+        gc.collect()
+        raise HTTPException(status_code=413, detail="Image is too large. Please upload an image under 6 MB.")
+
+    mime = payload.mime_type or "image/jpeg"
+    ocr_json: Dict[str, Any] = {}
+
+    try:
+        client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are an industrial electric motor nameplate OCR assistant. Extract the printed motor specifications from the nameplate image into strict JSON. "
+                    "Rules:\n"
+                    "1. Never guess or hallucinate unreadable numbers or text. If a value is scratched, blurry, obscured by glare, cut off, or unreadable, set it to null and add its human-readable field name to 'unclear_fields'.\n"
+                    "2. If the image is not a motor nameplate or is too blurry/dark to read core values, set 'is_readable' to false and explain why in 'reason'.\n"
+                    "3. If power is printed only in HP, convert to kW (HP * 0.7457) rounded to 2 decimals; if kW is printed, use kW directly.\n"
+                    "4. For motor_connection, normalize Δ / D / Delta to 'Delta' and Y / Star to 'Star'. If unclear or dual without a primary, set to null.\n"
+                    "5. Return ONLY valid JSON with these exact keys:\n"
+                    "{\n"
+                    '  "is_readable": true,\n'
+                    '  "confidence": "high",\n'
+                    '  "unclear_fields": [],\n'
+                    '  "reason": "",\n'
+                    '  "motor_make": "string or null (e.g. ABB, Siemens, Crompton Greaves, Bharat Bijlee)",\n'
+                    '  "motor_rating_kw": "number or null (rated power in kW)",\n'
+                    '  "frame_size": "string or null (e.g. 160M, 132S, M2BAX 160MLB)",\n'
+                    '  "rated_current_amps": "number or null (rated current in A)",\n'
+                    '  "rated_speed_rpm": "number or null (rated speed in RPM, e.g. 1465)",\n'
+                    '  "rated_voltage": "number or null (rated voltage in V, e.g. 415)",\n'
+                    '  "rated_efficiency_pct": "number or null (rated efficiency in %, e.g. 92.1)",\n'
+                    '  "motor_connection": "Delta or Star or null",\n'
+                    '  "motor_duty": "string or null (e.g. S1, S2)",\n'
+                    '  "insulation_class": "string or null (e.g. F, H, B)",\n'
+                    '  "motor_type": "string or null (e.g. IE3 Premium Efficiency, IE2, 3-Phase Induction Motor)",\n'
+                    '  "serial_number": "string or null (motor serial number)"\n'
+                    "}"
+                )
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Extract all specifications from this motor nameplate image as JSON."},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_data}", "detail": "high"}}
+                ]
+            }
+        ]
+        kwargs = build_chat_completion_kwargs(settings.OPENAI_CHAT_MODEL, messages, max_tokens=700, temperature=0.0)
+        resp = client.chat.completions.create(**kwargs)
+        raw_text = (resp.choices[0].message.content or "").strip()
+        if raw_text.startswith("```"):
+            raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
+            raw_text = re.sub(r"\s*```$", "", raw_text)
+        ocr_json = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return {
+            "success": False,
+            "needs_reupload": True,
+            "reason": "Could not parse clear motor nameplate details from the image. Please take or upload a clearer photo of the motor nameplate.",
+            "unclear_fields": [],
+            "extracted": {}
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"OpenAI Vision OCR failed: {exc}")
+    finally:
+        b64_data = None
+        payload.image_base64 = ""
+        gc.collect()
+
+    def _clean_float(val: Any) -> Optional[float]:
+        if val is None or val == "":
+            return None
+        try:
+            f = float(val)
+            return round(f, 2)
+        except (ValueError, TypeError):
+            return None
+
+    def _clean_str(val: Any) -> Optional[str]:
+        if val is None:
+            return None
+        s = str(val).strip()
+        return s if s and s.lower() != "null" else None
+
+    is_readable = bool(ocr_json.get("is_readable", True))
+    confidence = str(ocr_json.get("confidence", "high")).lower()
+    unclear_raw = ocr_json.get("unclear_fields") or []
+    unclear_fields = [str(u).strip() for u in unclear_raw if str(u).strip()]
+    reason = _clean_str(ocr_json.get("reason")) or ""
+
+    raw_conn = _clean_str(ocr_json.get("motor_connection"))
+    norm_conn: Optional[str] = None
+    if raw_conn:
+        c_low = raw_conn.lower()
+        if "delta" in c_low or c_low in ("d", "Δ"):
+            norm_conn = "Delta"
+        elif "star" in c_low or c_low in ("y", "s"):
+            norm_conn = "Star"
+
+    eff_val = _clean_float(ocr_json.get("rated_efficiency_pct"))
+    if eff_val is not None and (eff_val <= 0 or eff_val > 100):
+        eff_val = None
+
+    nameplate_record: Dict[str, Any] = {
+        "motor_make": _clean_str(ocr_json.get("motor_make")),
+        "motor_rating_kw": _clean_float(ocr_json.get("motor_rating_kw")),
+        "frame_size": _clean_str(ocr_json.get("frame_size")),
+        "rated_current_amps": _clean_float(ocr_json.get("rated_current_amps")),
+        "rated_speed_rpm": _clean_float(ocr_json.get("rated_speed_rpm")),
+        "rated_voltage": _clean_float(ocr_json.get("rated_voltage")),
+        "rated_efficiency_pct": eff_val,
+        "motor_connection": norm_conn,
+        "motor_duty": _clean_str(ocr_json.get("motor_duty")),
+        "insulation_class": _clean_str(ocr_json.get("insulation_class")),
+        "motor_type": _clean_str(ocr_json.get("motor_type")),
+        "serial_number": _clean_str(ocr_json.get("serial_number")),
+    }
+
+    unclear_norm = {u.lower().replace(" ", "_") for u in unclear_fields}
+    for k in list(nameplate_record.keys()):
+        if k in unclear_norm:
+            nameplate_record[k] = None
+
+    extracted_any_count = sum(1 for v in nameplate_record.values() if v is not None)
+    if not is_readable or extracted_any_count == 0:
+        return {
+            "success": False,
+            "needs_reupload": True,
+            "reason": reason or "The image is unclear or does not show a readable motor nameplate. Please take or upload a clearer photo.",
+            "unclear_fields": unclear_fields,
+            "extracted": {}
+        }
+
+    # Auto-populate Motor Name Plate Details in DeviceProfile
+    profile = device.profile
+    if not profile:
+        profile = DeviceProfile(device_id=device_id)
+        db.add(profile)
+
+    updated_profile_fields: Dict[str, Any] = {}
+    for field_name, field_val in nameplate_record.items():
+        if field_val is not None:
+            setattr(profile, field_name, field_val)
+            updated_profile_fields[field_name] = field_val
+
+    upload_dt = datetime.now(timezone.utc)
+    if payload.target_time:
+        try:
+            t_str = payload.target_time.replace(" ", "+").replace("Z", "+00:00")
+            parsed_dt = datetime.fromisoformat(t_str)
+            if parsed_dt.tzinfo is None:
+                parsed_dt = parsed_dt.replace(tzinfo=timezone.utc)
+            upload_dt = parsed_dt
+        except Exception:
+            upload_dt = datetime.now(timezone.utc)
+
+    ist_offset = timezone(timedelta(hours=5, minutes=30))
+    matched_iso = upload_dt.isoformat()
+    ist_str = upload_dt.astimezone(ist_offset).strftime("%d-%b-%Y %I:%M:%S %p IST")
+    nameplate_record["uploaded_at"] = matched_iso
+
+    # Also attach motor_nameplate metadata to nearest live reading if within 90s
+    nearest = (
+        db.query(Reading)
+        .filter(Reading.device_id == device_id)
+        .order_by(Reading.ts.desc())
+        .first()
+    )
+    if nearest:
+        ts_aware = nearest.ts if nearest.ts.tzinfo else nearest.ts.replace(tzinfo=timezone.utc)
+        if abs((upload_dt - ts_aware).total_seconds()) <= 90:
+            raw_copy = dict(nearest.raw) if isinstance(nearest.raw, dict) else {}
+            raw_copy["motor_nameplate"] = nameplate_record
+            nearest.raw = raw_copy
+            flag_modified(nearest, "raw")
+
+    db.commit()
+
+    needs_reupload = len(unclear_fields) > 0 or confidence == "low"
+    summary_parts = []
+    if nameplate_record.get("motor_make"):
+        summary_parts.append(nameplate_record["motor_make"])
+    if nameplate_record.get("motor_rating_kw") is not None:
+        summary_parts.append(f"{nameplate_record['motor_rating_kw']} kW")
+    if nameplate_record.get("rated_voltage") is not None:
+        summary_parts.append(f"{int(nameplate_record['rated_voltage'])} V")
+    if nameplate_record.get("rated_current_amps") is not None:
+        summary_parts.append(f"{nameplate_record['rated_current_amps']} A")
+    if nameplate_record.get("rated_speed_rpm") is not None:
+        summary_parts.append(f"{int(nameplate_record['rated_speed_rpm'])} RPM")
+    if nameplate_record.get("rated_efficiency_pct") is not None:
+        summary_parts.append(f"Eff {nameplate_record['rated_efficiency_pct']}%")
+
+    msg = f"Extracted motor nameplate data ({', '.join(summary_parts)}) and updated Motor Name Plate configuration."
+
+    return {
+        "success": True,
+        "partial": len(unclear_fields) > 0,
+        "needs_reupload": needs_reupload,
+        "confidence": confidence,
+        "unclear_fields": unclear_fields,
+        "reason": reason,
+        "device_id": device_id,
+        "matched_timestamp": matched_iso,
+        "matched_timestamp_ist": ist_str,
+        "extracted": nameplate_record,
+        "profile_updated": updated_profile_fields,
+        "message": msg
+    }
+
+
+

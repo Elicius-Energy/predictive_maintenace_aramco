@@ -117,3 +117,65 @@ export async function uploadMachineScreenImage(
     base64 = '';
   }
 }
+
+export interface MotorNameplateExtracted {
+  motor_make?: string | null;
+  motor_rating_kw?: number | null;
+  frame_size?: string | null;
+  rated_current_amps?: number | null;
+  rated_speed_rpm?: number | null;
+  rated_voltage?: number | null;
+  rated_efficiency_pct?: number | null;
+  motor_connection?: string | null;
+  motor_duty?: string | null;
+  insulation_class?: string | null;
+  motor_type?: string | null;
+  serial_number?: string | null;
+  uploaded_at?: string | null;
+  ts?: string | null;
+}
+
+export interface MotorNameplateOcrResponse {
+  success: boolean;
+  partial?: boolean;
+  needs_reupload?: boolean;
+  confidence?: string;
+  unclear_fields?: string[];
+  reason?: string;
+  device_id?: string;
+  matched_timestamp?: string | null;
+  matched_timestamp_ist?: string | null;
+  extracted: MotorNameplateExtracted;
+  profile_updated?: Record<string, any>;
+  message?: string;
+}
+
+export async function uploadMotorNameplateImage(
+  deviceId: string,
+  file: File,
+  targetTimeIso?: string
+): Promise<MotorNameplateOcrResponse> {
+  let { base64, mimeType } = await compressImageToBase64(file);
+  try {
+    const csrf = document.cookie
+      .split('; ')
+      .find((part) => part.startsWith('elicius_csrf='))
+      ?.split('=')[1];
+
+    const res = await axios.post<MotorNameplateOcrResponse>(
+      `/api/devices/${deviceId}/upload-motor-nameplate`,
+      {
+        image_base64: base64,
+        mime_type: mimeType,
+        target_time: targetTimeIso || new Date().toISOString(),
+      },
+      {
+        withCredentials: true,
+        headers: csrf ? { 'X-CSRF-Token': decodeURIComponent(csrf) } : {},
+      }
+    );
+    return res.data;
+  } finally {
+    base64 = '';
+  }
+}

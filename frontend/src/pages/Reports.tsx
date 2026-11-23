@@ -2,9 +2,15 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useDevice } from '../contexts/DeviceContext';
 import {
-  FileSpreadsheet, Download, RefreshCw, AlertCircle, Eye, Trash2
+  FileSpreadsheet, Download, RefreshCw, AlertCircle, Eye, Trash2, Timer
 } from 'lucide-react';
 import { TimeInputWithAmPm } from '../components/common/TimeInputWithAmPm';
+import {
+  getPowerStudy,
+  getReportDraft,
+  saveReportDraft,
+  type PowerStudySession
+} from '../utils/sessionPersistence';
 
 export const Reports: React.FC = () => {
   const { devices, selectedDevice, selectedDeviceId } = useDevice();
@@ -51,8 +57,18 @@ export const Reports: React.FC = () => {
     }
   };
 
-  // Study Form State (with sensible defaults)
-  const [preset, setPreset] = useState<'1h' | '8h' | '24h' | '7d' | 'custom'>('8h');
+  const getIntervalForDurationMs = (diffMs: number): '1-minute' | '5-minute' | '1-hour' => {
+    const hrs = diffMs / (1000 * 3600);
+    if (hrs <= 2) return '1-minute';
+    if (hrs <= 24) return '5-minute';
+    return '1-hour';
+  };
+
+  // Active or completed Power Study session for the selected device
+  const [activeStudy, setActiveStudy] = useState<PowerStudySession | null>(() => getPowerStudy(selectedDeviceId));
+
+  // Study Form State (restored from session draft or Power Study Period, cleared on logout)
+  const [preset, setPreset] = useState<'study' | '1h' | '8h' | '24h' | '7d' | 'custom'>('8h');
   const [startDate, setStartDate] = useState(() => getIstDateAndTime(new Date(Date.now() - 8 * 3600 * 1000)).date);
   const [startTime, setStartTime] = useState(() => getIstDateAndTime(new Date(Date.now() - 8 * 3600 * 1000)).time);
   const [endDate, setEndDate] = useState(() => getIstDateAndTime(new Date()).date);
@@ -73,6 +89,9 @@ export const Reports: React.FC = () => {
   const [installationCost, setInstallationCost] = useState<number>(0);
   const [manualBeforeKwhHr, setManualBeforeKwhHr] = useState<string>('');
   const [manualAfterKwhHr, setManualAfterKwhHr] = useState<string>('');
+  const [commercialTouched, setCommercialTouched] = useState<boolean>(false);
+  const [studyAnchor, setStudyAnchor] = useState<string | null>(null);
+  const [hydratedDeviceId, setHydratedDeviceId] = useState<string | null>(null);
 
   // Live Preview State
   const [preview, setPreview] = useState<any>(null);
@@ -109,8 +128,31 @@ export const Reports: React.FC = () => {
     }
   };
 
+  const applyStudyWindow = (study: PowerStudySession) => {
+    const startDt = new Date(study.startedAt);
+    const endDt = study.stoppedAt ? new Date(study.stoppedAt) : new Date();
+    const sFmt = getIstDateAndTime(startDt);
+    const eFmt = getIstDateAndTime(endDt);
+    setPreset('study');
+    setStartDate(sFmt.date);
+    setStartTime(sFmt.time);
+    setEndDate(eFmt.date);
+    setEndTime(eFmt.time);
+    setIntervalVal(getIntervalForDurationMs(Math.max(0, endDt.getTime() - startDt.getTime())));
+    setStudyAnchor(study.updatedAt);
+  };
+
   // Quick preset button handler
-  const handlePreset = (p: '1h' | '8h' | '24h' | '7d') => {
+  const handlePreset = (p: 'study' | '1h' | '8h' | '24h' | '7d') => {
+    if (p === 'study') {
+      const study = getPowerStudy(selectedDeviceId);
+      setActiveStudy(study);
+      if (study) {
+        applyStudyWindow(study);
+      }
+      return;
+    }
+
     setPreset(p);
     const now = new Date();
     const hours = p === '1h' ? 1 : p === '8h' ? 8 : p === '24h' ? 24 : 168;
@@ -129,24 +171,140 @@ export const Reports: React.FC = () => {
     else setIntervalVal('1-hour');
   };
 
-  // Pre-fill tariff and operating hours from device profile
+  // Hydrate report draft & Power Study Period whenever selectedDeviceId changes
   useEffect(() => {
-    if (!selectedDeviceId) return;
-    const loadProfileDefaults = async () => {
-      try {
-        const res = await axios.get(`/api/devices/${selectedDeviceId}/profile`, { withCredentials: true });
-        if (res.data) {
-          setTariff(res.data.electricity_tariff ?? '');
-          setOperatingHours(res.data.annual_operating_hours ?? '');
-          setMotorInvestment(res.data.motor_investment ?? 0);
-          setInstallationCost(res.data.installation_cost ?? 0);
-        }
-      } catch (err) {
-        console.error('Error loading profile for report:', err);
+    if (!selectedDeviceId) {
+      setHydratedDeviceId(null);
+      return;
+    }
+
+    const study = getPowerStudy(selectedDeviceId);
+    setActiveStudy(study);
+    const draft = getReportDraft(selectedDeviceId);
+
+    if (draft) {
+      setTitle(draft.title ?? '');
+      setRemarks(draft.remarks ?? '');
+      setIncludeAiSummary(!!draft.includeAiSummary);
+      setBeforeStart(draft.beforeStart || getIstDateAndTime(new Date(Date.now() - 48 * 3600 * 1000)).date);
+      setBeforeEnd(draft.beforeEnd || getIstDateAndTime(new Date(Date.now() - 24 * 3600 * 1000)).date);
+      setTariff(draft.tariff ?? '');
+      setOperatingHours(draft.operatingHours ?? '');
+      setMotorInvestment(draft.motorInvestment ?? 0);
+      setInstallationCost(draft.installationCost ?? 0);
+      setManualBeforeKwhHr(draft.manualBeforeKwhHr ?? '');
+      setManualAfterKwhHr(draft.manualAfterKwhHr ?? '');
+      setCommercialTouched(!!draft.commercialTouched);
+
+      // If a brand-new study was started or stopped since this draft was saved,
+      // automatically switch the default time window to the new study period.
+      if (study && study.updatedAt !== draft.studyAnchor) {
+        applyStudyWindow(study);
+      } else if (draft.preset === 'study' && study && study.status === 'running') {
+        applyStudyWindow(study);
+      } else {
+        setPreset(draft.preset || (study ? 'study' : '8h'));
+        setStartDate(draft.startDate);
+        setStartTime(draft.startTime);
+        setEndDate(draft.endDate);
+        setEndTime(draft.endTime);
+        setIntervalVal(draft.interval || '1-minute');
+        setStudyAnchor(draft.studyAnchor ?? null);
       }
-    };
-    loadProfileDefaults();
+    } else {
+      // Fresh session for this device: default to Power Study Period if available, else Last 8h
+      setTitle('');
+      setRemarks('');
+      setIncludeAiSummary(false);
+      setBeforeStart(getIstDateAndTime(new Date(Date.now() - 48 * 3600 * 1000)).date);
+      setBeforeEnd(getIstDateAndTime(new Date(Date.now() - 24 * 3600 * 1000)).date);
+      setManualBeforeKwhHr('');
+      setManualAfterKwhHr('');
+      setCommercialTouched(false);
+
+      if (study) {
+        applyStudyWindow(study);
+      } else {
+        const sFmt = getIstDateAndTime(new Date(Date.now() - 8 * 3600 * 1000));
+        const eFmt = getIstDateAndTime(new Date());
+        setPreset('8h');
+        setStartDate(sFmt.date);
+        setStartTime(sFmt.time);
+        setEndDate(eFmt.date);
+        setEndTime(eFmt.time);
+        setIntervalVal('1-minute');
+        setStudyAnchor(null);
+      }
+    }
+
+    setHydratedDeviceId(selectedDeviceId);
+
+    // Pre-fill commercial inputs from device profile only if user hasn't edited them in this session
+    if (!draft?.commercialTouched) {
+      const loadProfileDefaults = async () => {
+        try {
+          const res = await axios.get(`/api/devices/${selectedDeviceId}/profile`, { withCredentials: true });
+          if (res.data) {
+            setTariff(res.data.electricity_tariff ?? '');
+            setOperatingHours(res.data.annual_operating_hours ?? '');
+            setMotorInvestment(res.data.motor_investment ?? 0);
+            setInstallationCost(res.data.installation_cost ?? 0);
+          }
+        } catch (err) {
+          console.error('Error loading profile for report:', err);
+        }
+      };
+      loadProfileDefaults();
+    }
   }, [selectedDeviceId]);
+
+  // Persist Report form inputs across page navigation until logout
+  useEffect(() => {
+    if (!selectedDeviceId || hydratedDeviceId !== selectedDeviceId) return;
+    saveReportDraft(selectedDeviceId, {
+      preset,
+      startDate,
+      startTime,
+      endDate,
+      endTime,
+      interval,
+      title,
+      remarks,
+      includeAiSummary,
+      beforeStart,
+      beforeEnd,
+      tariff,
+      operatingHours,
+      motorInvestment,
+      installationCost,
+      manualBeforeKwhHr,
+      manualAfterKwhHr,
+      commercialTouched,
+      studyAnchor,
+    });
+  }, [
+    selectedDeviceId,
+    preset,
+    startDate,
+    startTime,
+    endDate,
+    endTime,
+    interval,
+    title,
+    remarks,
+    includeAiSummary,
+    beforeStart,
+    beforeEnd,
+    tariff,
+    operatingHours,
+    motorInvestment,
+    installationCost,
+    manualBeforeKwhHr,
+    manualAfterKwhHr,
+    commercialTouched,
+    studyAnchor,
+    hydratedDeviceId,
+  ]);
 
   // Fetch Live Preview as form inputs change
   useEffect(() => {
@@ -394,6 +552,25 @@ export const Reports: React.FC = () => {
             Study Window & Duration
           </label>
           <div className="flex flex-wrap items-center gap-2 mb-3">
+            {activeStudy && (
+              <button
+                type="button"
+                onClick={() => handlePreset('study')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  preset === 'study'
+                    ? 'bg-emerald-600 text-white shadow-2xs'
+                    : 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
+                }`}
+              >
+                <Timer className="w-3.5 h-3.5" />
+                <span>Study Period</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                  preset === 'study' ? 'bg-white/20 text-white' : 'bg-emerald-200/70 text-emerald-900'
+                }`}>
+                  {activeStudy.status === 'running' ? 'Live' : 'Recorded'}
+                </span>
+              </button>
+            )}
             {(['1h', '8h', '24h', '7d'] as const).map((p) => (
               <button
                 key={p}
@@ -525,7 +702,7 @@ export const Reports: React.FC = () => {
                     type="number"
                     step="0.01"
                     value={tariff}
-                    onChange={(e) => setTariff(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                    onChange={(e) => { setTariff(e.target.value === '' ? '' : parseFloat(e.target.value)); setCommercialTouched(true); }}
                     className="w-full bg-white border border-slate-300 rounded-lg p-2 font-medium"
                   />
                 </div>
@@ -535,7 +712,7 @@ export const Reports: React.FC = () => {
                     type="number"
                     step="1"
                     value={operatingHours}
-                    onChange={(e) => setOperatingHours(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                    onChange={(e) => { setOperatingHours(e.target.value === '' ? '' : parseFloat(e.target.value)); setCommercialTouched(true); }}
                     className="w-full bg-white border border-slate-300 rounded-lg p-2 font-medium"
                   />
                 </div>
@@ -545,7 +722,7 @@ export const Reports: React.FC = () => {
                     type="number"
                     step="100"
                     value={motorInvestment}
-                    onChange={(e) => setMotorInvestment(e.target.value === '' ? 0 : parseFloat(e.target.value))}
+                    onChange={(e) => { setMotorInvestment(e.target.value === '' ? 0 : parseFloat(e.target.value)); setCommercialTouched(true); }}
                     className="w-full bg-white border border-slate-300 rounded-lg p-2 font-medium"
                   />
                 </div>
@@ -555,7 +732,7 @@ export const Reports: React.FC = () => {
                     type="number"
                     step="100"
                     value={installationCost}
-                    onChange={(e) => setInstallationCost(e.target.value === '' ? 0 : parseFloat(e.target.value))}
+                    onChange={(e) => { setInstallationCost(e.target.value === '' ? 0 : parseFloat(e.target.value)); setCommercialTouched(true); }}
                     className="w-full bg-white border border-slate-300 rounded-lg p-2 font-medium"
                   />
                 </div>
