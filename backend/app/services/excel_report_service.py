@@ -100,6 +100,57 @@ def lookup_iec_efficiencies(kw: Optional[float]) -> Tuple[float, float, float, f
     return IEC_STANDARD_EFFICIENCIES[closest_kw]
 
 
+def _get_image_dimensions(path: Path) -> Tuple[int, int]:
+    """Read image pixel (width, height) using Pillow if available, else pure-Python JPEG/PNG header parser."""
+    try:
+        from PIL import Image as PilImage
+        with PilImage.open(path) as im:
+            return im.size
+    except Exception:
+        pass
+    try:
+        data = path.read_bytes()
+        # PNG signature
+        if data[:8] == b"\x89PNG\r\n\x1a\n" and len(data) >= 24:
+            w = int.from_bytes(data[16:20], "big")
+            h = int.from_bytes(data[20:24], "big")
+            if w > 0 and h > 0:
+                return (w, h)
+        # JPEG SOF marker scan
+        if data[:2] == b"\xff\xd8":
+            i = 2
+            n = len(data)
+            while i < n - 9:
+                if data[i] != 0xFF:
+                    i += 1
+                    continue
+                marker = data[i + 1]
+                if marker in (0xC0, 0xC1, 0xC2, 0xC3):
+                    h = int.from_bytes(data[i + 5:i + 7], "big")
+                    w = int.from_bytes(data[i + 7:i + 9], "big")
+                    if w > 0 and h > 0:
+                        return (w, h)
+                length = int.from_bytes(data[i + 2:i + 4], "big")
+                if length < 2:
+                    break
+                i += 2 + length
+    except Exception:
+        pass
+    return (1200, 900)
+
+
+def _find_motor_nameplate_photo(device_id: str) -> Optional[Path]:
+    """Return path to stored motor nameplate photo for device_id if it exists."""
+    import re
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", device_id)
+    nameplates_dir = Path(settings.REPORTS_DIR).parent / "nameplates"
+    for ext in (".jpg", ".jpeg", ".png"):
+        candidate = nameplates_dir / f"{safe_id}{ext}"
+        if candidate.is_file() and candidate.stat().st_size > 0:
+            return candidate
+    return None
+
+
 class ExcelReportService:
     """Generates professional Microsoft Excel reports using XlsxWriter."""
 
@@ -375,7 +426,58 @@ class ExcelReportService:
         row += 1
         ws.write(row, 1, "Serial Number:", f_bold); ws.write(row, 2, profile.serial_number or "", f_cell)
         ws.write(row, 3, "", f_cell); ws.write(row, 4, "", f_cell)
-        row += 2
+        row += 1
+
+        # Embed Motor Nameplate Photograph (if uploaded/captured for this device)
+        nameplate_path = _find_motor_nameplate_photo(profile.device_id)
+        if nameplate_path is not None:
+            fmt_photo_hdr = wb.add_format({
+                "bold": True, "font_size": 10, "font_color": "#1F3A8A",
+                "bg_color": "#EFF6FF", "border": 1, "border_color": "#CBD5E1",
+                "align": "center", "valign": "vcenter"
+            })
+            fmt_photo_box = wb.add_format({
+                "bg_color": "#F8FAFC", "border": 1, "border_color": "#CBD5E1",
+                "align": "center", "valign": "vcenter"
+            })
+            ws.set_row(row, 22)
+            ws.merge_range(row, 1, row, 4, "Motor Nameplate Photograph (On-Site Reference)", fmt_photo_hdr)
+            row += 1
+
+            photo_start_row = row
+            photo_rows = 12
+            row_height_pt = 20
+            for r_idx in range(photo_start_row, photo_start_row + photo_rows):
+                ws.set_row(r_idx, row_height_pt)
+            ws.merge_range(photo_start_row, 1, photo_start_row + photo_rows - 1, 4, "", fmt_photo_box)
+
+            # Columns B..E are each width 24 (~173 px each -> ~692 px total); 12 rows * 20pt ≈ 320 px
+            box_w_px = 680.0
+            box_h_px = float(photo_rows * row_height_pt * 4.0 / 3.0)  # 1 pt = 4/3 px
+            pad_x = 24.0
+            pad_y = 18.0
+            img_w, img_h = _get_image_dimensions(nameplate_path)
+            scale = min((box_w_px - pad_x) / max(img_w, 1), (box_h_px - pad_y) / max(img_h, 1), 1.0)
+            rendered_w = img_w * scale
+            rendered_h = img_h * scale
+            x_offset = max(8, int((box_w_px - rendered_w) / 2.0))
+            y_offset = max(8, int((box_h_px - rendered_h) / 2.0))
+
+            ws.insert_image(
+                photo_start_row,
+                1,
+                str(nameplate_path),
+                {
+                    "x_scale": scale,
+                    "y_scale": scale,
+                    "x_offset": x_offset,
+                    "y_offset": y_offset,
+                    "object_position": 1,
+                },
+            )
+            row = photo_start_row + photo_rows
+
+        row += 1
 
         # 3. MACHINE DETAILS
         ms_latest = summary.get("latest_machine_screen") or {}

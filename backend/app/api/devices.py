@@ -633,9 +633,11 @@ def upload_machine_screen(
     immediately release image bytes after OCR, populate the nearest timestamp reading row
     at the upload time, and auto-update Machine Details in the device configuration profile.
     """
+    import base64
     import gc
     import json
     import re
+    from pathlib import Path
     from openai import OpenAI
     from sqlalchemy.orm.attributes import flag_modified
     from app.config import settings
@@ -955,9 +957,11 @@ def upload_motor_nameplate(
     immediately release image bytes after OCR, and auto-update Motor Name Plate Details
     in the device configuration profile.
     """
+    import base64
     import gc
     import json
     import re
+    from pathlib import Path
     from openai import OpenAI
     from sqlalchemy.orm.attributes import flag_modified
     from app.config import settings
@@ -986,6 +990,11 @@ def upload_motor_nameplate(
 
     mime = payload.mime_type or "image/jpeg"
     ocr_json: Dict[str, Any] = {}
+    saved_image_bytes: Optional[bytes] = None
+    try:
+        saved_image_bytes = base64.b64decode(b64_data)
+    except Exception:
+        saved_image_bytes = None
 
     try:
         client = OpenAI(api_key=settings.OPENAI_API_KEY)
@@ -1113,6 +1122,27 @@ def upload_motor_nameplate(
             "unclear_fields": unclear_fields,
             "extracted": {}
         }
+
+    # Persist compressed motor nameplate photo per device for Excel report embedding
+    if saved_image_bytes:
+        try:
+            safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", device_id)
+            nameplates_dir = Path(settings.REPORTS_DIR).parent / "nameplates"
+            nameplates_dir.mkdir(parents=True, exist_ok=True)
+            out_path = nameplates_dir / f"{safe_id}.jpg"
+            try:
+                from io import BytesIO
+                from PIL import Image as PilImage
+                with PilImage.open(BytesIO(saved_image_bytes)) as img:
+                    img = img.convert("RGB")
+                    img.thumbnail((1200, 1200))
+                    img.save(out_path, format="JPEG", quality=88, optimize=True)
+            except Exception:
+                out_path.write_bytes(saved_image_bytes)
+        except Exception as exc:
+            print(f"[Nameplate] Warning: could not save motor nameplate photo for {device_id}: {exc}")
+        finally:
+            saved_image_bytes = None
 
     # Auto-populate Motor Name Plate Details in DeviceProfile
     profile = device.profile
