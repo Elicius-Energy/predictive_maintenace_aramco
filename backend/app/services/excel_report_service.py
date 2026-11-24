@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from app.config import settings
 from app.db.models import Device, DeviceProfile, Reading, Report, Alert
-from app.services.query_service import query_service
+from app.services.query_service import query_service, compute_true_pf
 from app.services.rag_service import rag_service
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -198,6 +198,15 @@ class ExcelReportService:
         summary["nameplate_duty"] = profile.motor_duty or None
         trends_data = query_service.get_trend_charts(device_id, start_time, end_time, interval, db)
         points = trends_data.get("points", [])
+        true_pf_vals = [p["true_pf"] for p in points if p.get("true_pf") is not None]
+        if true_pf_vals:
+            summary["avg_true_pf"] = round(sum(true_pf_vals) / len(true_pf_vals), 3)
+            summary["min_true_pf"] = round(min(true_pf_vals), 3)
+            summary["max_true_pf"] = round(max(true_pf_vals), 3)
+        else:
+            summary["avg_true_pf"] = None
+            summary["min_true_pf"] = None
+            summary["max_true_pf"] = None
 
         # Alerts in period
         alerts = (
@@ -545,6 +554,7 @@ class ExcelReportService:
             ("Voltage (Line-Line, V)", f"{summary.get('avg_voltage'):.1f}" if summary.get("avg_voltage") is not None else "Not available", "-", "-"),
             ("Current (A)", f"{summary.get('avg_current'):.2f}" if summary.get("avg_current") is not None else "Not available", "-", "-"),
             ("Power Factor (Weighted)", f"{summary.get('weighted_pf'):.2f}" if summary.get("weighted_pf") is not None else "Not available", "-", f"Avg: {summary.get('avg_pf'):.2f}" if summary.get("avg_pf") is not None else "-"),
+            ("True Power Factor (Calculated)", f"{summary.get('avg_true_pf'):.3f}" if summary.get("avg_true_pf") is not None else "Not available", f"{summary.get('min_true_pf'):.3f}" if summary.get("min_true_pf") is not None else "-", f"{summary.get('max_true_pf'):.3f}" if summary.get("max_true_pf") is not None else "-"),
             ("Frequency (Hz)", f"{summary.get('avg_frequency'):.2f}" if summary.get("avg_frequency") is not None else "Not available", "-", "-")
         ]
         for param, avg_val, min_val, max_val in measured:
@@ -1042,6 +1052,7 @@ class ExcelReportService:
             ("POWER QUALITY & UNBALANCE", [
                 ("Energy-Weighted Power Factor", summary.get("weighted_pf"), ""),
                 ("Arithmetic Average PF", summary.get("avg_pf"), ""),
+                ("True Power Factor (Calculated)", summary.get("avg_true_pf"), ""),
                 ("Average Voltage (Line-Line)", summary.get("avg_voltage"), "V"),
                 ("Voltage Unbalance", summary.get("voltage_unbalance_pct") / 100.0 if summary.get("voltage_unbalance_pct") is not None and summary.get("samples_count", 0) else None, "%"),
                 ("Current Unbalance", summary.get("current_unbalance_pct") / 100.0 if summary.get("current_unbalance_pct") is not None and summary.get("samples_count", 0) else None, "%"),
@@ -1088,8 +1099,8 @@ class ExcelReportService:
         headers = [
             "Date (IST)", "Time (IST)", "Interval kWh", "Cumulative kWh", "Power (kW)",
             "kW L1", "kW L2", "kW L3", "Voltage L-L Avg (V)", "V12", "V23", "V31",
-            "Current Avg (A)", "I L1", "I L2", "I L3", "PF Avg", "PF L1", "PF L2", "PF L3", "Frequency (Hz)",
-            "Temperature (°C)", "Speed (RPM)",
+            "Current Avg (A)", "I L1", "I L2", "I L3", "PF Avg", "PF L1", "PF L2", "PF L3", "true_pf",
+            "Frequency (Hz)", "Temperature (°C)", "Speed (RPM)",
             "Count (Ne)", "Spindle RPM", "TPI", "Doff Time (min)",
             "Front Roller RPM", "Delivery (m/min)", "Chase (mm)", "Length (M)",
             "Machine Eff (%)", "Suction (mm WC)"
@@ -1124,11 +1135,24 @@ class ExcelReportService:
             ws.write(row, 17, pt["pf1"] if pt["pf1"] is not None else "", f_num)
             ws.write(row, 18, pt["pf2"] if pt["pf2"] is not None else "", f_num)
             ws.write(row, 19, pt["pf3"] if pt["pf3"] is not None else "", f_num)
-            ws.write(row, 20, pt["freq"] if pt["freq"] is not None else "", f_num)
+            true_pf = pt.get("true_pf")
+            if true_pf is None:
+                true_pf = compute_true_pf(
+                    pt.get("kw"),
+                    v1n=pt.get("v1n"), v2n=pt.get("v2n"), v3n=pt.get("v3n"),
+                    vll_avg=vll,
+                    v12=v12 if isinstance(v12, (int, float)) else None,
+                    v23=v23 if isinstance(v23, (int, float)) else None,
+                    v31=v31 if isinstance(v31, (int, float)) else None,
+                    i1=pt.get("i1"), i2=pt.get("i2"), i3=pt.get("i3"),
+                    i_avg=pt.get("i_avg"),
+                )
+            ws.write(row, 20, true_pf if true_pf is not None else "", f_num if true_pf is not None else f_cell)
+            ws.write(row, 21, pt["freq"] if pt["freq"] is not None else "", f_num)
             temp_val = pt.get("temperature")
             rpm_val = pt.get("rpm")
-            ws.write(row, 21, temp_val if temp_val is not None else "", f_num if temp_val is not None else f_cell)
-            ws.write(row, 22, int(rpm_val) if rpm_val is not None else "", f_num if rpm_val is not None else f_cell)
+            ws.write(row, 22, temp_val if temp_val is not None else "", f_num if temp_val is not None else f_cell)
+            ws.write(row, 23, int(rpm_val) if rpm_val is not None else "", f_num if rpm_val is not None else f_cell)
 
             # Machine screen columns (populated ONLY on the row where the screen image was uploaded)
             screen_cols = [
@@ -1143,19 +1167,19 @@ class ExcelReportService:
                 pt.get("screen_efficiency_pct"),
                 pt.get("suction_pressure_mm_wc"),
             ]
-            for idx_sc, sc_val in enumerate(screen_cols, start=23):
+            for idx_sc, sc_val in enumerate(screen_cols, start=24):
                 ws.write(row, idx_sc, sc_val if sc_val is not None else "", f_num if sc_val is not None else f_cell)
 
     def _write_sheet_data_summary(self, ws, points, f_hdr, f_cell, f_num, f_bold):
         """Writes the 8-checkpoint shift audit summary sheet ('Data Summery sheet')."""
         ws.set_column(0, 0, 8)    # Sr no
         ws.set_column(1, 2, 16)   # Date (IST), Time (IST)
-        ws.set_column(3, 8, 16)   # Power, kWh, VLL, I, PF, Freq
-        ws.set_column(9, 9, 32)   # Remarks
+        ws.set_column(3, 9, 16)   # Power, kWh, VLL, I, PF, True PF, Freq
+        ws.set_column(10, 10, 32) # Remarks
 
         ckpt_headers = [
             "Sr no", "Date (IST)", "Time (IST)", "Power (kW)", "Cumulative kWh",
-            "Voltage L-L Avg (V)", "Current Avg (A)", "PF Avg", "Frequency (Hz)", "Remarks"
+            "Voltage L-L Avg (V)", "Current Avg (A)", "PF Avg", "true_pf", "Frequency (Hz)", "Remarks"
         ]
         for c, h in enumerate(ckpt_headers):
             ws.write(0, c, h, f_hdr)
@@ -1196,7 +1220,9 @@ class ExcelReportService:
                 ws.write(r_idx, 5, vll if vll is not None else "", f_num if vll is not None else f_cell)
                 ws.write(r_idx, 6, c_pt.get("i_avg") if c_pt.get("i_avg") is not None else "", f_num if c_pt.get("i_avg") is not None else f_cell)
                 ws.write(r_idx, 7, c_pt.get("pf_avg") if c_pt.get("pf_avg") is not None else "", f_num if c_pt.get("pf_avg") is not None else f_cell)
-                ws.write(r_idx, 8, c_pt.get("freq") if c_pt.get("freq") is not None else "", f_num if c_pt.get("freq") is not None else f_cell)
+                c_true_pf = c_pt.get("true_pf")
+                ws.write(r_idx, 8, c_true_pf if c_true_pf is not None else "", f_num if c_true_pf is not None else f_cell)
+                ws.write(r_idx, 9, c_pt.get("freq") if c_pt.get("freq") is not None else "", f_num if c_pt.get("freq") is not None else f_cell)
 
                 remarks_str = "Opening reading" if sr == 1 else ""
                 t_val = c_pt.get("temperature")
@@ -1219,7 +1245,7 @@ class ExcelReportService:
                     m_str = ", ".join(meas)
                     remarks_str = f"{remarks_str} ({m_str})" if remarks_str else m_str
 
-                ws.write(r_idx, 9, remarks_str, f_cell)
+                ws.write(r_idx, 10, remarks_str, f_cell)
             else:
                 for c in range(1, len(ckpt_headers)):
                     ws.write(r_idx, c, "", f_cell)
@@ -1268,15 +1294,21 @@ class ExcelReportService:
         chart_v.set_size({"width": 600, "height": 320})
         ws.insert_chart("L2", chart_v)
 
-        # Chart 4: Power Factor Trend
+        # Chart 4: Power Factor Trend (Meter PF + Calculated True PF)
         chart_pf = wb.add_chart({"type": "line"})
         chart_pf.add_series({
-            "name": "Power Factor",
+            "name": "Meter PF",
             "categories": f"=Data!$A$2:$B${num_pts+1}",
             "values": f"=Data!$Q$2:$Q${num_pts+1}",
-            "line": {"color": "#10B981", "width": 2}
+            "line": {"color": "#10B981", "width": 1.5}
         })
-        chart_pf.set_title({"name": "Power Factor Trend"})
+        chart_pf.add_series({
+            "name": "True PF (Calculated)",
+            "categories": f"=Data!$A$2:$B${num_pts+1}",
+            "values": f"=Data!$U$2:$U${num_pts+1}",
+            "line": {"color": "#1F3A8A", "width": 2}
+        })
+        chart_pf.set_title({"name": "Power Factor Trend (Meter vs True PF)"})
         chart_pf.set_y_axis({"min": 0, "max": 1.0})
         chart_pf.set_size({"width": 600, "height": 320})
         ws.insert_chart("L19", chart_pf)

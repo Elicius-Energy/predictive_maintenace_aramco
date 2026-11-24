@@ -11,6 +11,59 @@ from sqlalchemy.orm import Session
 from app.db.models import Device, DeviceProfile, Reading, Alert
 
 
+def compute_true_pf(
+    t_kw: Optional[float],
+    v1n: Optional[float] = None,
+    v2n: Optional[float] = None,
+    v3n: Optional[float] = None,
+    vll_avg: Optional[float] = None,
+    v12: Optional[float] = None,
+    v23: Optional[float] = None,
+    v31: Optional[float] = None,
+    i1: Optional[float] = None,
+    i2: Optional[float] = None,
+    i3: Optional[float] = None,
+    i_avg: Optional[float] = None,
+) -> Optional[float]:
+    """
+    Calculate True Power Factor = |P_kW| / S_kVA from measured voltages, currents, and active power.
+    Uses per-phase apparent power (V1N*I1 + V2N*I2 + V3N*I3)/1000 when 3-phase L-N voltages & phase
+    currents are available; falls back to sqrt(3) * V_LL_avg * I_avg / 1000.
+    Clamped to [0.0, 1.0] and rounded to 3 decimal places.
+    """
+    if t_kw is None:
+        return None
+    s_kva = 0.0
+    if (
+        v1n is not None and v2n is not None and v3n is not None
+        and i1 is not None and i2 is not None and i3 is not None
+        and (v1n > 0 or v2n > 0 or v3n > 0)
+        and (i1 > 0 or i2 > 0 or i3 > 0)
+    ):
+        s_kva = (abs(v1n) * abs(i1) + abs(v2n) * abs(i2) + abs(v3n) * abs(i3)) / 1000.0
+    else:
+        v_ll = vll_avg
+        if v_ll is None:
+            v_vals = [v for v in (v12, v23, v31) if v is not None and v > 0]
+            v_ll = sum(v_vals) / len(v_vals) if v_vals else None
+        if v_ll is None:
+            vn_vals = [v for v in (v1n, v2n, v3n) if v is not None and v > 0]
+            v_ll = (sum(vn_vals) / len(vn_vals)) * math.sqrt(3.0) if vn_vals else None
+
+        i_val = i_avg
+        if i_val is None:
+            i_vals = [i for i in (i1, i2, i3) if i is not None and i >= 0]
+            i_val = sum(i_vals) / len(i_vals) if i_vals else None
+
+        if v_ll is not None and v_ll > 0 and i_val is not None and i_val > 0:
+            s_kva = (math.sqrt(3.0) * v_ll * i_val) / 1000.0
+
+    if s_kva <= 1e-6:
+        return None
+    pf = abs(t_kw) / s_kva
+    return round(min(1.0, max(0.0, pf)), 3)
+
+
 class QueryService:
     """Service providing aggregated telemetry queries and engineering calculations."""
 
@@ -289,7 +342,7 @@ class QueryService:
                     "v_avg": None, "vll_avg": None, "v12": None, "v23": None, "v31": None,
                     "v1n": None, "v2n": None, "v3n": None,
                     "i_avg": None, "i1": None, "i2": None, "i3": None,
-                    "pf_avg": None, "pf1": None, "pf2": None, "pf3": None,
+                    "pf_avg": None, "pf1": None, "pf2": None, "pf3": None, "true_pf": None,
                     "freq": None,
                     "temperature": None,
                     "rpm": None,
@@ -382,6 +435,20 @@ class QueryService:
                     "pf1": pf1_val,
                     "pf2": pf2_val,
                     "pf3": pf3_val,
+                    "true_pf": compute_true_pf(
+                        avg_kw,
+                        v1n=self._avg([v.get("v1n") for v in vals]),
+                        v2n=self._avg([v.get("v2n") for v in vals]),
+                        v3n=self._avg([v.get("v3n") for v in vals]),
+                        vll_avg=vll_val,
+                        v12=v12_val,
+                        v23=v23_val,
+                        v31=v31_val,
+                        i1=i1_val,
+                        i2=i2_val,
+                        i3=i3_val,
+                        i_avg=i_avg_val,
+                    ),
                     "freq": self._safe_round(self._avg([v.get("freq") for v in vals]), 2),
                     "temperature": self._safe_round(self._avg([v.get("temperature") for v in vals if v.get("temperature") is not None]), 1),
                     "rpm": self._safe_round(self._avg([v.get("rpm") for v in vals if v.get("rpm") is not None]), 0),

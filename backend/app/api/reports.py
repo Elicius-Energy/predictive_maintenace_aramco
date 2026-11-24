@@ -18,7 +18,7 @@ from app.db.base import SessionLocal
 from app.db.models import Report, Reading, Device, User
 from app.api.auth import get_current_user, require_roles, require_device_access
 from app.services.excel_report_service import excel_report_service
-from app.services.query_service import query_service
+from app.services.query_service import query_service, compute_true_pf
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 logger = logging.getLogger(__name__)
@@ -255,7 +255,7 @@ def download_raw_data(
             "Date (IST)", "Time (IST)", "Device_ID", "v1n", "v2n", "v3n", "vln_avg",
             "v12", "v23", "v31", "vll_avg", "i1", "i2", "i3", "i_avg",
             "kw1", "kw2", "kw3", "t_kw", "kvar1", "kvar2", "kvar3", "t_kvar",
-            "kva1", "kva2", "kva3", "t_kva", "pf1", "pf2", "pf3", "pf_avg",
+            "kva1", "kva2", "kva3", "t_kva", "pf1", "pf2", "pf3", "pf_avg", "true_pf",
             "freq", "kwh_imp", "kvarh_imp", "t_kvah", "md_kw", "md_kva",
             "temperature_c", "rpm",
             "count_ne", "spindle_rpm", "tpi", "doff_time_min",
@@ -298,12 +298,20 @@ def download_raw_data(
                     r_epoch = int(r.ts.timestamp()) if r.ts.tzinfo else int(r.ts.replace(tzinfo=timezone.utc).timestamp())
                     ms = screen_by_ts.get(r_epoch)
 
+                true_pf_val = compute_true_pf(
+                    r.t_kw,
+                    v1n=r.v1n, v2n=r.v2n, v3n=r.v3n,
+                    vll_avg=r.vll_avg, v12=r.v12, v23=r.v23, v31=r.v31,
+                    i1=r.i1, i2=r.i2, i3=r.i3, i_avg=r.i_avg,
+                )
+                true_pf_cell = true_pf_val if true_pf_val is not None else ""
+
                 if ms:
                     writer.writerow([
                         date_str, time_str, r.device_id, r.v1n, r.v2n, r.v3n, r.vln_avg,
                         r.v12, r.v23, r.v31, r.vll_avg, r.i1, r.i2, r.i3, r.i_avg,
                         r.kw1, r.kw2, r.kw3, r.t_kw, r.kvar1, r.kvar2, r.kvar3, r.t_kvar,
-                        r.kva1, r.kva2, r.kva3, r.t_kva, r.pf1, r.pf2, r.pf3, r.pf_avg,
+                        r.kva1, r.kva2, r.kva3, r.t_kva, r.pf1, r.pf2, r.pf3, r.pf_avg, true_pf_cell,
                         r.freq, r.kwh_imp, r.kvarh_imp, r.t_kvah, r.md_kw, r.md_kva,
                         r.temperature if r.temperature is not None else "",
                         int(r.rpm) if r.rpm is not None else "",
@@ -323,7 +331,7 @@ def download_raw_data(
                         date_str, time_str, r.device_id, r.v1n, r.v2n, r.v3n, r.vln_avg,
                         r.v12, r.v23, r.v31, r.vll_avg, r.i1, r.i2, r.i3, r.i_avg,
                         r.kw1, r.kw2, r.kw3, r.t_kw, r.kvar1, r.kvar2, r.kvar3, r.t_kvar,
-                        r.kva1, r.kva2, r.kva3, r.t_kva, r.pf1, r.pf2, r.pf3, r.pf_avg,
+                        r.kva1, r.kva2, r.kva3, r.t_kva, r.pf1, r.pf2, r.pf3, r.pf_avg, true_pf_cell,
                         r.freq, r.kwh_imp, r.kvarh_imp, r.t_kvah, r.md_kw, r.md_kva,
                         r.temperature if r.temperature is not None else "",
                         int(r.rpm) if r.rpm is not None else "",
