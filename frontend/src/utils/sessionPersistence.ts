@@ -17,10 +17,17 @@ export const STORAGE_KEYS = {
 // ── Power Study Stopwatch Sessions (per device) ───────────────────────────────
 
 export interface PowerStudySession {
+  id?: number;
+  studyCode?: string;
+  customerName?: string;
+  displayLabel?: string;
   status: 'idle' | 'running' | 'completed';
   startedAt: string; // ISO UTC
   stoppedAt: string | null; // ISO UTC
   updatedAt: string; // ISO UTC (used to detect newly started/stopped studies)
+  durationSeconds?: number;
+  energyKwh?: number | null;
+  kwhPerRunningHour?: number | null;
 }
 
 function readJsonMap<T>(key: string): Record<string, T> {
@@ -78,6 +85,13 @@ export function stopPowerStudy(deviceId: string): PowerStudySession | null {
   return updated;
 }
 
+export function savePowerStudy(deviceId: string, session: PowerStudySession): PowerStudySession {
+  const map = readJsonMap<PowerStudySession>(STORAGE_KEYS.POWER_STUDIES);
+  map[deviceId] = session;
+  writeJsonMap(STORAGE_KEYS.POWER_STUDIES, map);
+  return session;
+}
+
 export function resetPowerStudy(deviceId: string): void {
   const map = readJsonMap<PowerStudySession>(STORAGE_KEYS.POWER_STUDIES);
   delete map[deviceId];
@@ -129,6 +143,8 @@ export interface ReportFormDraft {
   includeAiSummary: boolean;
   beforeStart: string;
   beforeEnd: string;
+  beforeStudyId?: string;
+  selectedStudyId?: string;
   tariff: number | '';
   operatingHours: number | '';
   motorInvestment: number;
@@ -173,6 +189,13 @@ export function saveLatestNameplate(deviceId: string, data: Record<string, any>)
   if (!deviceId) return;
   const map = readJsonMap<Record<string, any>>(STORAGE_KEYS.LATEST_NAMEPLATE);
   map[deviceId] = data;
+  writeJsonMap(STORAGE_KEYS.LATEST_NAMEPLATE, map);
+}
+
+export function clearLatestNameplate(deviceId: string | null): void {
+  if (!deviceId) return;
+  const map = readJsonMap<Record<string, any>>(STORAGE_KEYS.LATEST_NAMEPLATE);
+  delete map[deviceId];
   writeJsonMap(STORAGE_KEYS.LATEST_NAMEPLATE, map);
 }
 

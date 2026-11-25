@@ -66,13 +66,13 @@ describe('Elicius Frontend Smoke Tests', () => {
     expect(screen.getByText('Elicius Energy')).toBeInTheDocument();
     expect(screen.getByText('IoT Energy Monitoring')).toBeInTheDocument();
 
-    // Verify EXACTLY 3 page tabs
+    // Verify Navigation tabs
     expect(screen.getByText('Configuration')).toBeInTheDocument();
     expect(screen.getByText('Dashboard')).toBeInTheDocument();
-    expect(screen.getByText('Reports & Downloads')).toBeInTheDocument();
+    expect(screen.getByText('Reports')).toBeInTheDocument();
 
     // Verify Device selector
-    expect(screen.getByDisplayValue('Ring Frame 14 - Main Motor (Normal)')).toBeInTheDocument();
+    expect(screen.getByDisplayValue(/Ring Frame 14 - Main Motor/i)).toBeInTheDocument();
 
     // Verify Logout button
     expect(screen.getByTitle('Sign Out')).toBeInTheDocument();

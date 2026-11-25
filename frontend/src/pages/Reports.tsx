@@ -66,6 +66,9 @@ export const Reports: React.FC = () => {
 
   // Active or completed Power Study session for the selected device
   const [activeStudy, setActiveStudy] = useState<PowerStudySession | null>(() => getPowerStudy(selectedDeviceId));
+  const [recordedStudies, setRecordedStudies] = useState<any[]>([]);
+  const [selectedStudyId, setSelectedStudyId] = useState<string>('');
+  const [beforeStudyId, setBeforeStudyId] = useState<string>('');
 
   // Study Form State (restored from session draft or Power Study Period, cleared on logout)
   const [preset, setPreset] = useState<'study' | '1h' | '8h' | '24h' | '7d' | 'custom'>('8h');
@@ -80,7 +83,7 @@ export const Reports: React.FC = () => {
 
   // Energy Saving & ROI is part of the required report template.
   const includeRoi = true;
-  const [includeAiSummary, setIncludeAiSummary] = useState(false);
+  const [includeAiSummary, setIncludeAiSummary] = useState(true);
   const [beforeStart, setBeforeStart] = useState(() => getIstDateAndTime(new Date(Date.now() - 48 * 3600 * 1000)).date);
   const [beforeEnd, setBeforeEnd] = useState(() => getIstDateAndTime(new Date(Date.now() - 24 * 3600 * 1000)).date);
   const [tariff, setTariff] = useState<number | ''>('');
@@ -185,9 +188,11 @@ export const Reports: React.FC = () => {
     if (draft) {
       setTitle(draft.title ?? '');
       setRemarks(draft.remarks ?? '');
-      setIncludeAiSummary(!!draft.includeAiSummary);
+      setIncludeAiSummary(draft.includeAiSummary ?? true);
       setBeforeStart(draft.beforeStart || getIstDateAndTime(new Date(Date.now() - 48 * 3600 * 1000)).date);
       setBeforeEnd(draft.beforeEnd || getIstDateAndTime(new Date(Date.now() - 24 * 3600 * 1000)).date);
+      setBeforeStudyId(draft.beforeStudyId ?? '');
+      setSelectedStudyId(draft.selectedStudyId ?? '');
       setTariff(draft.tariff ?? '');
       setOperatingHours(draft.operatingHours ?? '');
       setMotorInvestment(draft.motorInvestment ?? 0);
@@ -215,9 +220,11 @@ export const Reports: React.FC = () => {
       // Fresh session for this device: default to Power Study Period if available, else Last 8h
       setTitle('');
       setRemarks('');
-      setIncludeAiSummary(false);
+      setIncludeAiSummary(true);
       setBeforeStart(getIstDateAndTime(new Date(Date.now() - 48 * 3600 * 1000)).date);
       setBeforeEnd(getIstDateAndTime(new Date(Date.now() - 24 * 3600 * 1000)).date);
+      setBeforeStudyId('');
+      setSelectedStudyId('');
       setManualBeforeKwhHr('');
       setManualAfterKwhHr('');
       setCommercialTouched(false);
@@ -238,6 +245,40 @@ export const Reports: React.FC = () => {
     }
 
     setHydratedDeviceId(selectedDeviceId);
+
+    // Fetch recorded power studies from server for Before Power Study dropdown & Study Window selector
+    const fetchRecordedStudies = async () => {
+      try {
+        const [allRes, activeRes] = await Promise.all([
+          axios.get('/api/studies', { withCredentials: true }),
+          axios.get(`/api/devices/${selectedDeviceId}/studies/active`, { withCredentials: true }).catch(() => ({ data: null })),
+        ]);
+        if (Array.isArray(allRes.data)) {
+          setRecordedStudies(allRes.data);
+        }
+        if (activeRes.data && activeRes.data.study_code) {
+          const srv = activeRes.data;
+          const mapped: PowerStudySession = {
+            id: srv.id,
+            studyCode: srv.study_code,
+            customerName: srv.customer_name || '',
+            displayLabel: srv.display_label || srv.study_code,
+            status: srv.status === 'running' ? 'running' : 'completed',
+            startedAt: srv.started_at,
+            stoppedAt: srv.stopped_at || null,
+            updatedAt: srv.updated_at || srv.stopped_at || srv.started_at,
+          };
+          setActiveStudy(mapped);
+          if (!draft) {
+            applyStudyWindow(mapped);
+            setSelectedStudyId(String(srv.id));
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching recorded power studies:', err);
+      }
+    };
+    fetchRecordedStudies();
 
     // Pre-fill commercial inputs from device profile only if user hasn't edited them in this session
     if (!draft?.commercialTouched) {
@@ -273,6 +314,8 @@ export const Reports: React.FC = () => {
       includeAiSummary,
       beforeStart,
       beforeEnd,
+      beforeStudyId,
+      selectedStudyId,
       tariff,
       operatingHours,
       motorInvestment,
@@ -295,6 +338,8 @@ export const Reports: React.FC = () => {
     includeAiSummary,
     beforeStart,
     beforeEnd,
+    beforeStudyId,
+    selectedStudyId,
     tariff,
     operatingHours,
     motorInvestment,
@@ -421,8 +466,7 @@ export const Reports: React.FC = () => {
             annual_operating_hours: operatingHours === '' ? undefined : operatingHours,
             motor_investment: motorInvestment,
             installation_cost: installationCost,
-            before_start: toIsoUtc(beforeStart, '00:00'),
-            before_end: toIsoUtc(beforeEnd, '23:59'),
+            before_study_id: beforeStudyId ? Number(beforeStudyId) : undefined,
             before_kwh_hr_manual: manualBeforeKwhHr ? parseFloat(manualBeforeKwhHr) : undefined,
             after_kwh_hr_manual: manualAfterKwhHr ? parseFloat(manualAfterKwhHr) : undefined,
           },
@@ -563,13 +607,44 @@ export const Reports: React.FC = () => {
                 }`}
               >
                 <Timer className="w-3.5 h-3.5" />
-                <span>Study Period</span>
+                <span>{activeStudy.studyCode ? `Study ${activeStudy.studyCode}` : 'Study Period'}</span>
                 <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
                   preset === 'study' ? 'bg-white/20 text-white' : 'bg-emerald-200/70 text-emerald-900'
                 }`}>
                   {activeStudy.status === 'running' ? 'Live' : 'Recorded'}
                 </span>
               </button>
+            )}
+            {recordedStudies.length > 0 && (
+              <select
+                aria-label="Select Recorded Power Study Window"
+                value={selectedStudyId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedStudyId(val);
+                  const found = recordedStudies.find((s) => String(s.id) === val);
+                  if (found) {
+                    applyStudyWindow({
+                      id: found.id,
+                      studyCode: found.study_code,
+                      customerName: found.customer_name || '',
+                      displayLabel: found.display_label,
+                      status: found.status === 'running' ? 'running' : 'completed',
+                      startedAt: found.started_at,
+                      stoppedAt: found.stopped_at || null,
+                      updatedAt: found.updated_at || found.stopped_at || found.started_at,
+                    });
+                  }
+                }}
+                className="bg-emerald-50/70 border border-emerald-200 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-900 focus:border-[#1F3A8A] focus:outline-hidden cursor-pointer"
+              >
+                <option value="">Choose Recorded Study (Code & Customer)...</option>
+                {recordedStudies.map((s) => (
+                  <option key={s.id} value={String(s.id)}>
+                    {s.study_code} — {s.customer_name || 'No Customer'} ({s.status === 'running' ? 'Running' : s.duration_str || 'Completed'})
+                  </option>
+                ))}
+              </select>
             )}
             {(['1h', '8h', '24h', '7d'] as const).map((p) => (
               <button
@@ -738,32 +813,42 @@ export const Reports: React.FC = () => {
                 </div>
               </div>
 
-              {/* Before Window & Manual Overrides */}
+              {/* Before Power Study Dropdown & Manual Overrides */}
               <div className="pt-2 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div>
-              <label className="block font-semibold text-slate-600 mb-1">Before Window Start</label>
-              <input
-                type="date"
-                value={beforeStart}
-                onChange={(e) => setBeforeStart(e.target.value)}
-                className="w-full bg-white border border-slate-300 rounded-lg p-2 font-medium"
-              />
-            </div>
-            <div>
-              <label className="block font-semibold text-slate-600 mb-1">Before Window End</label>
-              <input
-                type="date"
-                value={beforeEnd}
-                onChange={(e) => setBeforeEnd(e.target.value)}
-                className="w-full bg-white border border-slate-300 rounded-lg p-2 font-medium"
-              />
-            </div>
+                <div className="sm:col-span-2">
+                  <label htmlFor="before-power-study-select" className="block font-semibold text-slate-600 mb-1">
+                    Before Power Study (Code & Customer Name)
+                  </label>
+                  <select
+                    id="before-power-study-select"
+                    value={beforeStudyId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setBeforeStudyId(val);
+                      const chosen = recordedStudies.find((s) => String(s.id) === val);
+                      if (chosen && chosen.kwh_per_running_hour != null) {
+                        setManualBeforeKwhHr(String(chosen.kwh_per_running_hour));
+                      } else if (!val) {
+                        setManualBeforeKwhHr('');
+                      }
+                    }}
+                    className="w-full bg-white border border-slate-300 rounded-lg p-2 font-medium text-slate-800 cursor-pointer focus:border-[#1F3A8A] focus:outline-hidden"
+                  >
+                    <option value="">-- Select Power Study for Before kWh/hr --</option>
+                    {recordedStudies.map((s) => (
+                      <option key={s.id} value={String(s.id)}>
+                        {s.study_code} — {s.customer_name || 'No Customer'}
+                        {s.kwh_per_running_hour != null ? ` (${Number(s.kwh_per_running_hour).toFixed(2)} kWh/hr)` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div>
                   <label className="block font-semibold text-slate-600 mb-1">Before kWh/hr (Manual Override)</label>
                   <input
                     type="number"
                     step="0.01"
-                    placeholder="Auto from DB"
+                    placeholder="Auto from selected study"
                     value={manualBeforeKwhHr}
                     onChange={(e) => setManualBeforeKwhHr(e.target.value)}
                     className="w-full bg-white border border-slate-300 rounded-lg p-2 font-medium"

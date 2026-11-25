@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useDevice } from '../contexts/DeviceContext';
+import { useAuth } from '../contexts/AuthContext';
 import {
   Activity, Zap, Gauge, Flame, Clock, RefreshCw, AlertTriangle,
   CheckCircle2, WifiOff, AlertCircle, Loader2, Thermometer, RotateCw, Check, Camera,
-  Upload, Play, Square, Timer, RotateCcw
+  Upload, Play, Square, Timer, Trash2, Building
 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
@@ -24,17 +25,21 @@ import {
 } from '../utils/machineScreenOcr';
 import {
   getPowerStudy,
+  savePowerStudy,
   startPowerStudy,
   stopPowerStudy,
   resetPowerStudy,
   mergeConfigDraft,
   getLatestNameplate,
   saveLatestNameplate,
+  clearLatestNameplate,
   type PowerStudySession
 } from '../utils/sessionPersistence';
 
 export const Dashboard: React.FC = () => {
   const { devices, selectedDevice, selectedDeviceId, getStatusColor } = useDevice();
+  const { user } = useAuth();
+  const isAdmin = user?.role?.toLowerCase() === 'admin';
   
   // Live cards data
   const [liveData, setLiveData] = useState<any>(null);
@@ -329,13 +334,71 @@ export const Dashboard: React.FC = () => {
     res: MachineScreenOcrResponse | MotorNameplateOcrResponse;
   } | null>(null);
 
-  // Power Study Stopwatch state (persisted per device until logout)
+  // Power Study Stopwatch state (synchronized with backend DB across logins/users)
   const [studySession, setStudySession] = useState<PowerStudySession | null>(null);
   const [studyElapsedSec, setStudyElapsedSec] = useState<number>(0);
+  const [studyCustomerName, setStudyCustomerName] = useState<string>('');
+  const [studyActionLoading, setStudyActionLoading] = useState<boolean>(false);
+  const customerEditedRef = useRef<boolean>(false);
+
+  const mapServerStudyToSession = (srv: any): PowerStudySession => ({
+    id: srv.id,
+    studyCode: srv.study_code,
+    customerName: srv.customer_name || '',
+    displayLabel: srv.display_label || srv.study_code,
+    status: srv.status === 'running' ? 'running' : 'completed',
+    startedAt: srv.started_at,
+    stoppedAt: srv.stopped_at || null,
+    updatedAt: srv.updated_at || srv.stopped_at || srv.started_at,
+    durationSeconds: srv.duration_seconds,
+    energyKwh: srv.energy_kwh,
+    kwhPerRunningHour: srv.kwh_per_running_hour,
+  });
+
+  const syncActiveStudyFromServer = async (deviceId: string, isInitial = false) => {
+    if (!deviceId) return;
+    try {
+      const res = await axios.get(`/api/devices/${deviceId}/studies/active`, { withCredentials: true });
+      if (res.data && res.data.study_code) {
+        const mapped = mapServerStudyToSession(res.data);
+        setStudySession(mapped);
+        savePowerStudy(deviceId, mapped);
+        if (isInitial || !customerEditedRef.current || mapped.status === 'running') {
+          setStudyCustomerName(mapped.customerName || '');
+        }
+      } else if (isInitial) {
+        const local = getPowerStudy(deviceId);
+        setStudySession(local);
+        setStudyCustomerName(local?.customerName || '');
+      }
+    } catch {
+      if (isInitial) {
+        const local = getPowerStudy(deviceId);
+        setStudySession(local);
+        setStudyCustomerName(local?.customerName || '');
+      }
+    }
+  };
 
   useEffect(() => {
+    customerEditedRef.current = false;
     setStudySession(getPowerStudy(selectedDeviceId));
     setLatestMotorNameplate(getLatestNameplate(selectedDeviceId) as MotorNameplateExtracted | null);
+    if (selectedDeviceId) {
+      syncActiveStudyFromServer(selectedDeviceId, true);
+      axios
+        .get(`/api/devices/${selectedDeviceId}/profile`, { withCredentials: true })
+        .then((res) => {
+          if (res.data) {
+            if (res.data.has_nameplate_image === false) {
+              clearLatestNameplate(selectedDeviceId);
+              setLatestMotorNameplate(null);
+            }
+            setStudyCustomerName((prev) => prev || res.data.customer_name || '');
+          }
+        })
+        .catch(() => {});
+    }
   }, [selectedDeviceId]);
 
   useEffect(() => {
@@ -363,35 +426,107 @@ export const Dashboard: React.FC = () => {
     return [hrs, mins, secs].map((n) => String(n).padStart(2, '0')).join(':');
   };
 
-  const handleStartStudy = () => {
-    if (!selectedDeviceId) return;
-    const started = startPowerStudy(selectedDeviceId);
-    setStudySession(started);
+  const handleStartStudy = async () => {
+    if (!selectedDeviceId || studyActionLoading) return;
+    setStudyActionLoading(true);
     setManualErrorMsg(null);
-    setManualSuccessMsg(`Power study started at ${formatIstTimeOnly(started.startedAt)}. Click "Stop Study" when finished.`);
-  };
-
-  const handleStopStudy = () => {
-    if (!selectedDeviceId) return;
-    const stopped = stopPowerStudy(selectedDeviceId);
-    if (stopped) {
-      setStudySession(stopped);
-      const elapsed = Math.max(
-        0,
-        Math.floor((new Date(stopped.stoppedAt || Date.now()).getTime() - new Date(stopped.startedAt).getTime()) / 1000)
+    try {
+      const res = await axios.post(
+        `/api/devices/${selectedDeviceId}/studies/start`,
+        { customer_name: studyCustomerName.trim() },
+        { withCredentials: true }
       );
-      setManualErrorMsg(null);
-      setManualSuccessMsg(
-        `Power study stopped (${formatStopwatch(elapsed)}). This study period is now set as the default on the Reports page.`
-      );
+      if (res.data && res.data.study_code) {
+        const mapped = mapServerStudyToSession(res.data);
+        setStudySession(mapped);
+        savePowerStudy(selectedDeviceId, mapped);
+        setStudyCustomerName(mapped.customerName || '');
+        customerEditedRef.current = false;
+        setManualSuccessMsg(
+          `Power study ${mapped.studyCode}${mapped.customerName ? ` (${mapped.customerName})` : ''} started at ${formatIstTimeOnly(mapped.startedAt)}. Click "Stop Study" when finished.`
+        );
+      } else {
+        const started = startPowerStudy(selectedDeviceId);
+        setStudySession(started);
+      }
+    } catch (err: any) {
+      if (err.response?.status === 409) {
+        await syncActiveStudyFromServer(selectedDeviceId, true);
+        setManualErrorMsg(err.response?.data?.detail || 'A power study is already running on this device.');
+      } else {
+        const started = startPowerStudy(selectedDeviceId);
+        setStudySession(started);
+        setManualSuccessMsg(`Power study started at ${formatIstTimeOnly(started.startedAt)}. Click "Stop Study" when finished.`);
+      }
+    } finally {
+      setStudyActionLoading(false);
     }
   };
 
-  const handleResetStudy = () => {
-    if (!selectedDeviceId) return;
-    resetPowerStudy(selectedDeviceId);
-    setStudySession(null);
-    setStudyElapsedSec(0);
+  const handleStopStudy = async () => {
+    if (!selectedDeviceId || studyActionLoading) return;
+    setStudyActionLoading(true);
+    setManualErrorMsg(null);
+    try {
+      const res = await axios.post(
+        `/api/devices/${selectedDeviceId}/studies/stop`,
+        { customer_name: studyCustomerName.trim() },
+        { withCredentials: true }
+      );
+      if (res.data && res.data.study_code) {
+        const mapped = mapServerStudyToSession(res.data);
+        setStudySession(mapped);
+        savePowerStudy(selectedDeviceId, mapped);
+        customerEditedRef.current = false;
+        const elapsed = mapped.durationSeconds ?? Math.max(
+          0,
+          Math.floor((new Date(mapped.stoppedAt || Date.now()).getTime() - new Date(mapped.startedAt).getTime()) / 1000)
+        );
+        setManualSuccessMsg(
+          `Power study ${mapped.studyCode}${mapped.customerName ? ` — ${mapped.customerName}` : ''} stopped (${formatStopwatch(elapsed)}). Available in Reports dropdown.`
+        );
+      } else {
+        const stopped = stopPowerStudy(selectedDeviceId);
+        if (stopped) setStudySession(stopped);
+      }
+    } catch (err: any) {
+      const stopped = stopPowerStudy(selectedDeviceId);
+      if (stopped) {
+        setStudySession(stopped);
+      } else {
+        setManualErrorMsg(err.response?.data?.detail || 'Failed to stop power study.');
+      }
+    } finally {
+      setStudyActionLoading(false);
+    }
+  };
+
+  const handleDeleteStudy = async () => {
+    if (!selectedDeviceId || !studySession) return;
+    if (!studySession.id) {
+      resetPowerStudy(selectedDeviceId);
+      setStudySession(null);
+      setStudyElapsedSec(0);
+      return;
+    }
+    const label = studySession.displayLabel || studySession.studyCode || 'this study';
+    if (typeof window !== 'undefined' && window.confirm && !window.confirm(`Delete power study "${label}"? Its duration and name will be safely archived in the backend recovery database.`)) {
+      return;
+    }
+    setStudyActionLoading(true);
+    setManualErrorMsg(null);
+    try {
+      await axios.delete(`/api/studies/${studySession.id}`, { withCredentials: true });
+      resetPowerStudy(selectedDeviceId);
+      setStudySession(null);
+      setStudyElapsedSec(0);
+      setManualSuccessMsg(`Power study ${studySession.studyCode || ''} deleted from active list and archived in the backend recovery database.`);
+      await syncActiveStudyFromServer(selectedDeviceId, true);
+    } catch (err: any) {
+      setManualErrorMsg(err.response?.data?.detail || 'Failed to delete power study.');
+    } finally {
+      setStudyActionLoading(false);
+    }
   };
 
   // 1. Polling for Live Cards (every 5 seconds)
@@ -409,6 +544,7 @@ export const Dashboard: React.FC = () => {
     } catch (err) {
       console.error('Error fetching live data:', err);
     }
+    syncActiveStudyFromServer(selectedDeviceId, false);
   };
 
   useEffect(() => {
@@ -1123,9 +1259,9 @@ export const Dashboard: React.FC = () => {
             </div>
           </div>
 
-          {/* Right: Power Study Stopwatch */}
+          {/* Right: Power Study Stopwatch & Customer Attribution */}
           <div className="xl:border-l xl:border-slate-200 xl:pl-3.5 pt-2.5 xl:pt-0 border-t xl:border-t-0 border-slate-200/80 shrink-0">
-            <div className={`rounded-xl border px-3 py-2 flex flex-col gap-1.5 transition-colors min-w-[270px] ${
+            <div className={`rounded-xl border px-3 py-2 flex flex-col gap-2 transition-colors min-w-[300px] ${
               studySession?.status === 'running'
                 ? 'bg-emerald-50/90 border-emerald-300'
                 : studySession?.status === 'completed'
@@ -1134,7 +1270,7 @@ export const Dashboard: React.FC = () => {
             }`}>
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     {studySession?.status === 'running' ? (
                       <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
                     ) : (
@@ -1147,6 +1283,11 @@ export const Dashboard: React.FC = () => {
                         ? 'Study Recorded'
                         : 'Power Study'}
                     </span>
+                    {studySession?.studyCode && (
+                      <span className="px-1.5 py-0.5 rounded bg-[#1F3A8A] text-white font-mono text-[10px] font-bold tracking-wide">
+                        {studySession.studyCode}
+                      </span>
+                    )}
                   </div>
                   <div className="font-mono text-base font-extrabold text-slate-900 leading-tight mt-0.5">
                     {formatStopwatch(studyElapsedSec)}
@@ -1158,34 +1299,70 @@ export const Dashboard: React.FC = () => {
                     <button
                       type="button"
                       onClick={handleStopStudy}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                      disabled={studyActionLoading}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
                     >
                       <Square className="w-3.5 h-3.5 fill-current" />
                       <span>Stop Study</span>
                     </button>
                   ) : (
-                    <>
-                      <button
-                        type="button"
-                        onClick={handleStartStudy}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
-                      >
-                        <Play className="w-3.5 h-3.5 fill-current" />
-                        <span>{studySession?.status === 'completed' ? 'New Study' : 'Start Study'}</span>
-                      </button>
-                      {studySession?.status === 'completed' && (
-                        <button
-                          type="button"
-                          onClick={handleResetStudy}
-                          title="Clear recorded study"
-                          className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </>
+                    <button
+                      type="button"
+                      onClick={handleStartStudy}
+                      disabled={studyActionLoading}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>{studySession?.status === 'completed' ? 'New Study' : 'Start Study'}</span>
+                    </button>
+                  )}
+                  {isAdmin && studySession && (
+                    <button
+                      type="button"
+                      onClick={handleDeleteStudy}
+                      disabled={studyActionLoading}
+                      title="Delete study (archived in backend recovery DB)"
+                      className="p-1.5 rounded-lg border border-rose-200 bg-white text-rose-600 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   )}
                 </div>
+              </div>
+
+              {/* Customer Name Input alongside Start/Stop Study */}
+              <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg px-2 py-1 shadow-2xs">
+                <Building className="w-3.5 h-3.5 text-[#1F3A8A] shrink-0" />
+                <input
+                  type="text"
+                  aria-label="Study Customer Name"
+                  placeholder="Enter customer name..."
+                  value={studyCustomerName}
+                  onChange={(e) => {
+                    setStudyCustomerName(e.target.value);
+                    customerEditedRef.current = true;
+                  }}
+                  onBlur={() => {
+                    if (studySession?.id && customerEditedRef.current && studyCustomerName.trim()) {
+                      axios
+                        .patch(
+                          `/api/studies/${studySession.id}`,
+                          { customer_name: studyCustomerName.trim() },
+                          { withCredentials: true }
+                        )
+                        .then((res) => {
+                          if (res.data?.study_code && selectedDeviceId) {
+                            const mapped = mapServerStudyToSession(res.data);
+                            setStudySession(mapped);
+                            savePowerStudy(selectedDeviceId, mapped);
+                            customerEditedRef.current = false;
+                          }
+                        })
+                        .catch(() => {});
+                    }
+                  }}
+                  className="w-full bg-transparent text-xs font-semibold text-slate-800 placeholder:text-slate-400 focus:outline-hidden"
+                />
               </div>
 
               {/* Accurate Start & End Timestamps in IST */}

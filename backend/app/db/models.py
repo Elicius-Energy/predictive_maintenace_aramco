@@ -265,6 +265,36 @@ class Report(Base):
     device = relationship("Device", back_populates="reports")
 
 
+class PowerStudy(Base):
+    __tablename__ = "power_studies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    study_code = Column(String(32), unique=True, nullable=False, index=True)
+    device_id = Column(String(64), ForeignKey("devices.device_id", ondelete="CASCADE"), nullable=False, index=True)
+    customer_name = Column(String(255), default="", nullable=False)
+    status = Column(String(32), default="running", nullable=False, index=True)  # running, completed
+    started_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    stopped_at = Column(DateTime(timezone=True), nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+    energy_kwh = Column(Float, nullable=True)
+    running_hours = Column(Float, nullable=True)
+    avg_kw = Column(Float, nullable=True)
+    kwh_per_running_hour = Column(Float, nullable=True)
+    started_by = Column(String(100), nullable=True)
+    stopped_by = Column(String(100), nullable=True)
+    summary_snapshot = Column(JSON, default=dict, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    device = relationship("Device")
+
+
+
 class KBChunk(Base):
     __tablename__ = "kb_chunks"
     

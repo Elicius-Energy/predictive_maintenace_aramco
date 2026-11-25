@@ -4,6 +4,7 @@ Generates comprehensive 5-sheet workbooks conforming to the LEDL Motor Energy Re
 featuring native Excel charts, live formulas for ROI, and print-ready A4 landscape styling.
 """
 import os
+import math
 import logging
 import json
 from datetime import datetime, timezone, timedelta
@@ -14,12 +15,33 @@ import asyncio
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from app.config import settings
-from app.db.models import Device, DeviceProfile, Reading, Report, Alert
+from app.db.models import Device, DeviceProfile, Reading, Report, Alert, PowerStudy
 from app.services.query_service import query_service, compute_true_pf
 from app.services.rag_service import rag_service
 
 IST = timezone(timedelta(hours=5, minutes=30))
 logger = logging.getLogger(__name__)
+
+
+def _estimate_wrapped_row_height(
+    text: Any,
+    col_chars_width: int = 80,
+    line_height_pt: float = 18.0,
+    min_height_pt: float = 24.0,
+) -> float:
+    """Calculate dynamic Excel row height in points for wrapped single-line or multi-line cell text."""
+    s = str(text or "").strip()
+    if not s:
+        return min_height_pt
+    safe_width = max(10, int(col_chars_width))
+    total_visual_lines = 0
+    for paragraph in s.splitlines():
+        p_len = len(paragraph.strip())
+        if p_len == 0:
+            total_visual_lines += 1
+        else:
+            total_visual_lines += max(1, math.ceil(p_len / safe_width))
+    return max(min_height_pt, float(total_visual_lines * line_height_pt + 10.0))
 
 
 def _json_safe(value: Any) -> Any:
@@ -239,10 +261,13 @@ class ExcelReportService:
         roi_data = self._compute_roi_data(device_id, start_time, end_time, summary, profile, roi_params or {}, db)
 
         replacement_analysis = self._calculate_replacement_scenarios(summary, profile, roi_data)
-        ai_summary = None
         if include_ai_summary:
             ai_summary = self._generate_ai_report_summary(
                 device, profile, summary, auto_obs, replacement_analysis, start_time, end_time, db
+            )
+        else:
+            ai_summary = self._build_fallback_executive_summary(
+                device, profile, summary, auto_obs, replacement_analysis, roi_data, start_time, end_time
             )
 
         # 3. Create Excel File on disk
@@ -260,37 +285,40 @@ class ExcelReportService:
 
         fmt_title = workbook.add_format({
             "bold": True, "font_size": 16, "font_color": "white",
-            "bg_color": NAVY, "align": "center", "valign": "vcenter"
+            "bg_color": NAVY, "align": "center", "valign": "vcenter", "text_wrap": True
         })
         fmt_subtitle = workbook.add_format({
             "bold": True, "font_size": 12, "font_color": "white",
-            "bg_color": NAVY, "align": "center", "valign": "vcenter"
+            "bg_color": NAVY, "align": "center", "valign": "vcenter", "text_wrap": True
         })
         fmt_section = workbook.add_format({
             "bold": True, "font_size": 11, "font_color": "white",
-            "bg_color": NAVY, "align": "left", "valign": "vcenter", "border": 1, "border_color": BORDER_COLOR
+            "bg_color": NAVY, "align": "left", "valign": "vcenter", "border": 1, "border_color": BORDER_COLOR, "text_wrap": True
         })
         fmt_header = workbook.add_format({
             "bold": True, "font_size": 10, "bg_color": "#E2E8F0",
-            "border": 1, "border_color": BORDER_COLOR, "align": "left", "valign": "vcenter"
+            "border": 1, "border_color": BORDER_COLOR, "align": "left", "valign": "vcenter", "text_wrap": True
         })
         fmt_cell = workbook.add_format({
-            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "align": "left", "valign": "vcenter"
+            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "align": "left", "valign": "vcenter", "text_wrap": True
+        })
+        fmt_cell_top = workbook.add_format({
+            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "align": "left", "valign": "top", "text_wrap": True
         })
         fmt_cell_bold = workbook.add_format({
-            "bold": True, "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "align": "left", "valign": "vcenter"
+            "bold": True, "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "align": "left", "valign": "vcenter", "text_wrap": True
         })
         fmt_num = workbook.add_format({
-            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "num_format": "#,##0.00", "align": "left", "valign": "vcenter"
+            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "num_format": "#,##0.00", "align": "left", "valign": "vcenter", "text_wrap": True
         })
         fmt_num_int = workbook.add_format({
-            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "num_format": "#,##0", "align": "left", "valign": "vcenter"
+            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "num_format": "#,##0", "align": "left", "valign": "vcenter", "text_wrap": True
         })
         fmt_pct = workbook.add_format({
-            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "num_format": "0.0%", "align": "left", "valign": "vcenter"
+            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "num_format": "0.0%", "align": "left", "valign": "vcenter", "text_wrap": True
         })
         fmt_datetime = workbook.add_format({
-            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "num_format": "yyyy-mm-dd hh:mm:ss", "align": "left", "valign": "vcenter"
+            "font_size": 10, "border": 1, "border_color": BORDER_COLOR, "num_format": "yyyy-mm-dd hh:mm:ss", "align": "left", "valign": "vcenter", "text_wrap": True
         })
 
         # ── SHEET 1: Energy Reading Report (Client Template) ─────────────
@@ -300,7 +328,8 @@ class ExcelReportService:
         ws1.fit_to_pages(1, 0)
         self._write_sheet1_reading_report(
             ws1, workbook, report_no, profile, summary, user_remarks, auto_obs, roi_data,
-            fmt_title, fmt_subtitle, fmt_section, fmt_header, fmt_cell, fmt_cell_bold, fmt_num, fmt_datetime
+            fmt_title, fmt_subtitle, fmt_section, fmt_header, fmt_cell, fmt_cell_bold, fmt_num, fmt_datetime,
+            ai_summary=ai_summary, f_cell_top=fmt_cell_top
         )
 
         # ── SHEET 2: Energy Saving & ROI ──────────────────────────────────
@@ -382,15 +411,20 @@ class ExcelReportService:
 
     def _write_sheet1_reading_report(
         self, ws, wb, report_no, profile, summary, remarks, auto_obs, roi_data,
-        f_title, f_sub, f_sec, f_hdr, f_cell, f_bold, f_num, f_dt
+        f_title, f_sub, f_sec, f_hdr, f_cell, f_bold, f_num, f_dt,
+        ai_summary: Optional[str] = None, f_cell_top=None
     ):
+        f_top = f_cell_top or f_cell
+        ws.set_default_row(22)
         ws.set_column("A:A", 5)
-        ws.set_column("B:B", 24)
-        ws.set_column("C:C", 24)
-        ws.set_column("D:D", 24)
-        ws.set_column("E:E", 24)
+        ws.set_column("B:B", 28)
+        ws.set_column("C:C", 26)
+        ws.set_column("D:D", 28)
+        ws.set_column("E:E", 26)
 
         # Header Titles
+        ws.set_row(0, 28)
+        ws.set_row(1, 24)
         ws.merge_range("A1:E1", "LAKSHMI ELECTRICAL DRIVES LTD.", f_title)
         ws.merge_range("A2:E2", "MOTOR ENERGY READING REPORT", f_sub)
         ws.write("B3", "Report No:", f_bold)
@@ -569,11 +603,15 @@ class ExcelReportService:
         ws.merge_range(row, 0, row, 4, "POWER STUDY CALCULATIONS", f_sec)
         row += 1
         duty = self._classify_observed_duty(summary)
-        ws.write(row, 1, "Observed duty pattern:", f_bold); ws.merge_range(row, 2, row + 1, 4, duty, f_cell)
+        duty_h = _estimate_wrapped_row_height(duty, col_chars_width=70, line_height_pt=18.0, min_height_pt=38.0)
+        ws.set_row(row, duty_h)
+        ws.write(row, 1, "Observed duty pattern:", f_bold)
+        ws.merge_range(row, 2, row, 4, duty, f_top)
         row += 1
         rated_kw = profile.motor_rating_kw
         avg_kw = summary.get("avg_kw")
         max_kw = summary.get("max_kw")
+        ws.set_row(row, 26)
         ws.write(row, 1, "Average loading (% of motor rating):", f_bold)
         avg_loading = (avg_kw / rated_kw * 100.0) if avg_kw is not None and rated_kw and rated_kw > 0 else None
         ws.write(row, 2, avg_loading if avg_loading is not None else "Not available", f_num if avg_loading is not None else f_cell)
@@ -581,6 +619,7 @@ class ExcelReportService:
         max_loading = (max_kw / rated_kw * 100.0) if max_kw is not None and rated_kw and rated_kw > 0 else None
         ws.write(row, 4, max_loading if max_loading is not None else "Not available", f_num if max_loading is not None else f_cell)
         row += 1
+        ws.set_row(row, 24)
         ws.write(row, 1, "Measured consumption while running:", f_bold)
         ws.write(row, 2, roi_data.get("after_kwh_hr") if roi_data.get("after_kwh_hr") is not None else "Not available", f_num if roi_data.get("after_kwh_hr") is not None else f_cell)
         ws.write(row, 3, "kWh per running hour", f_cell); ws.write(row, 4, "", f_cell)
@@ -598,8 +637,19 @@ class ExcelReportService:
         full_remarks += f"Study window: {_to_ist_str(summary.get('start_time'))} to {_to_ist_str(summary.get('end_time'))} IST. "
         full_remarks += f"Telemetry samples: {summary.get('samples_count', 0)}; data completeness: {summary.get('data_completeness_pct', 'n/a')}%. "
         full_remarks += f"Duty pattern: {duty}"
-        ws.merge_range(row, 1, row + 2, 4, full_remarks or "", f_cell)
-        row += 4
+        remarks_h = _estimate_wrapped_row_height(full_remarks, col_chars_width=92, line_height_pt=18.0, min_height_pt=64.0)
+        ws.set_row(row, remarks_h)
+        ws.merge_range(row, 1, row, 4, full_remarks or "", f_top)
+        row += 2
+
+        # AI POWER STUDY SUMMARY (fully visible directly on main report sheet when included)
+        if ai_summary:
+            ws.merge_range(row, 0, row, 4, "AI POWER STUDY SUMMARY", f_sec)
+            row += 1
+            ai_h = _estimate_wrapped_row_height(ai_summary, col_chars_width=92, line_height_pt=18.0, min_height_pt=72.0)
+            ws.set_row(row, ai_h)
+            ws.merge_range(row, 1, row, 4, ai_summary, f_top)
+            row += 2
 
         # 7. CUSTOMER CONFIRMATION & 8. LEDL REPRESENTATIVE
         ws.merge_range(row, 0, row, 2, "7. CUSTOMER CONFIRMATION", f_sec)
@@ -618,11 +668,13 @@ class ExcelReportService:
         ws.write(row, 3, "Date:", f_bold); ws.write(row, 4, "", f_cell)
         row += 1
     def _write_sheet2_roi(self, ws, wb, roi, profile, scenarios, f_title, f_sec, f_hdr, f_cell, f_bold, f_num, f_pct):
+        ws.set_default_row(24)
         ws.set_column("A:A", 5)
-        ws.set_column("B:B", 35)
-        ws.set_column("C:C", 20)
-        ws.set_column("D:D", 15)
+        ws.set_column("B:B", 38)
+        ws.set_column("C:C", 24)
+        ws.set_column("D:D", 18)
 
+        ws.set_row(0, 28)
         ws.merge_range("B1:D1", "ENERGY SAVING & RETURN ON INVESTMENT (ROI)", f_title)
 
         ws.write("B3", "Parameter", f_hdr)
@@ -714,12 +766,15 @@ class ExcelReportService:
         ws.write("D17", "Years", f_cell)
 
         ws.write("B19", "Baseline note:", f_bold)
-        if roi.get("before_kwh_hr") is not None:
+        if roi.get("before_study_label"):
+            baseline_note = f"Baseline recorded from Power Study {roi['before_study_label']}."
+        elif roi.get("before_kwh_hr") is not None:
             baseline_note = "Baseline recorded from customer-specified historical window."
         elif primary_scen.get("saving_kw"):
             baseline_note = f"Baseline projected from measured telemetry load ({primary_scen.get('loading_pct')}%) vs {primary_scen.get('label', 'IE3/IE4 upgrade')}."
         else:
             baseline_note = "Blank savings indicate no usable pre-change baseline was recorded."
+        ws.set_row(18, _estimate_wrapped_row_height(baseline_note, col_chars_width=38, line_height_pt=18.0, min_height_pt=28.0))
         ws.merge_range("C19:D19", baseline_note, f_cell)
 
         # Add native Excel Bar Chart for Before vs After
@@ -865,6 +920,52 @@ class ExcelReportService:
 
         return scenarios
 
+    def _build_fallback_executive_summary(
+        self, device, profile, summary, observations, scenarios, roi_data, start_time, end_time
+    ) -> str:
+        """Build a detailed, deterministic executive text summary when OpenAI is offline or not invoked."""
+        scen = scenarios[0] if scenarios else {}
+        energy_kwh = summary.get("energy_kwh") or 0.0
+        avg_kw = summary.get("avg_kw") or 0.0
+        max_kw = summary.get("max_kw") or 0.0
+        run_hrs = summary.get("running_hours") or 0.0
+        dur_hrs = summary.get("duration_hours") or 0.0
+        pf = summary.get("weighted_pf") or summary.get("avg_pf")
+        tariff = (roi_data or {}).get("electricity_tariff") or profile.electricity_tariff or scen.get("tariff_used") or 10.0
+        period_cost = energy_kwh * float(tariff)
+        rated_kw = profile.motor_rating_kw
+        loading_str = f"{(avg_kw / rated_kw * 100.0):.1f}% of {rated_kw:.1f} kW nameplate rating" if (rated_kw and rated_kw > 0) else f"average load {avg_kw:.2f} kW (peak {max_kw:.2f} kW)"
+
+        lines = [
+            f"• Study Overview ({_to_ist_str(start_time)} to {_to_ist_str(end_time)} IST): Monitored {device.alias or device.device_id} across {dur_hrs:.2f} hours ({run_hrs:.2f} running hours). Total energy consumed: {energy_kwh:.2f} kWh (estimated study period cost: Rs. {period_cost:,.2f} @ Rs. {float(tariff):.2f}/kWh).",
+            f"• Motor Loading & Power Quality: Operating at {loading_str}, with average active power {avg_kw:.2f} kW, peak demand {max_kw:.2f} kW, and weighted power factor {f'{pf:.2f}' if pf is not None else 'N/A'}.",
+        ]
+        if (roi_data or {}).get("before_kwh_hr") and (roi_data or {}).get("after_kwh_hr"):
+            b_val = roi_data["before_kwh_hr"]
+            a_val = roi_data["after_kwh_hr"]
+            diff = b_val - a_val
+            b_lbl = roi_data.get("before_study_label") or "baseline study"
+            if diff > 0:
+                lines.append(
+                    f"• Before vs. After Study Comparison ({b_lbl}): Specific consumption improved from {b_val:.2f} kWh/hr to {a_val:.2f} kWh/hr, achieving a direct measured saving of {diff:.2f} kWh per running hour."
+                )
+            else:
+                lines.append(
+                    f"• Before vs. After Study Comparison ({b_lbl}): Baseline specific consumption was {b_val:.2f} kWh/hr compared to current study {a_val:.2f} kWh/hr."
+                )
+        if scen.get("annual_kwh_saving"):
+            lines.append(
+                f"• Efficiency Upgrade & Savings Outlook ({scen.get('label', 'IE3/IE4 Upgrade')}): Projected annual energy saving of {scen.get('annual_kwh_saving', 0):,.1f} kWh/year (Rs. {scen.get('annual_cost_saving', 0):,.0f}/year or Rs. {scen.get('monthly_cost_saving', 0):,.0f}/month) based on {scen.get('annual_loaded_hours', 0):,.0f} loaded operating hours/year."
+            )
+        if len(scenarios) > 1:
+            alt = scenarios[1]
+            lines.append(
+                f"• Right-Sizing Opportunity ({alt.get('label')}): {alt.get('status')} Estimated annual saving: {alt.get('annual_kwh_saving', 0):,.1f} kWh/year (Rs. {alt.get('annual_cost_saving', 0):,.0f}/year)."
+            )
+        for obs in (observations or []):
+            lines.append(f"• Engineering Recommendation: {obs}")
+        return "\n".join(lines)
+
     def _generate_ai_report_summary(self, device, profile, summary, observations, scenarios, start_time, end_time, db):
         """Ask the configured OpenAI RAG service to summarize compact report facts with actionable savings."""
         payload = {
@@ -907,10 +1008,14 @@ class ExcelReportService:
             "COMPACT REPORT DATA (JSON):\n" + json.dumps(payload, default=str, separators=(",", ":"))
         )
         try:
-            return asyncio.run(rag_service.generate_report_insights(prompt, device.device_id, db))
+            res = asyncio.run(rag_service.generate_report_insights(prompt, device.device_id, db))
+            if res and not str(res).strip().lower().startswith("ai insights unavailable"):
+                return res
         except Exception as exc:
             logger.exception("AI report summary failed")
-            return f"AI insights unavailable: {exc}"
+        return self._build_fallback_executive_summary(
+            device, profile, summary, observations, scenarios, {}, start_time, end_time
+        )
 
     @staticmethod
     def _write_ai_summary(ws, wb, ai_summary, scenarios, study, roi, f_title, f_section, f_header, f_cell, f_bold, f_num):
@@ -940,18 +1045,22 @@ class ExcelReportService:
         ws.hide_gridlines(2)
         ws.set_landscape()
         ws.set_paper(9)
-        ws.fit_to_pages(1, 1)
+        ws.fit_to_pages(1, 0)
         ws.set_margins(0.35, 0.35, 0.5, 0.5)
         ws.set_column("A:A", 3)
-        ws.set_column("B:B", 38)
-        ws.set_column("C:C", 22)
-        ws.set_column("D:D", 22)
+        ws.set_column("B:B", 44)
+        ws.set_column("C:C", 26)
+        ws.set_column("D:D", 26)
         ws.merge_range("B2:D2", "ENERGY, COST & REPLACEMENT SAVINGS SUMMARY", f_summary_title)
         ws.set_row(1, 32)
         ws.merge_range("B4:D4", "AI POWER STUDY SUMMARY", f_summary_section)
-        ws.merge_range("B5:D9", ai_summary or "AI insights unavailable.", f_summary_text)
+        ws.set_row(3, 26)
+        ai_text = ai_summary or "AI insights unavailable."
+        ws.merge_range("B5:D9", ai_text, f_summary_text)
+        total_ai_h = _estimate_wrapped_row_height(ai_text, col_chars_width=86, line_height_pt=18.0, min_height_pt=150.0)
+        per_row_ai_h = max(30.0, math.ceil(total_ai_h / 5.0))
         for row in range(4, 9):
-            ws.set_row(row, 26)
+            ws.set_row(row, per_row_ai_h)
 
         ws.merge_range("B11:D11", "ENERGY AND COST OUTLOOK", f_summary_section)
         scenario = scenarios[0] if scenarios else {}
@@ -1002,14 +1111,18 @@ class ExcelReportService:
         else:
             details = "Replacement savings estimated based on standard IE3 upgrade and observed duty cycle."
         ws.merge_range("B20:D22", details, f_summary_text)
+        limitations_text = (
+            "Savings are realistic engineering estimates based on measured average load, IEC 60034-30-1 standard efficiency curves, observed duty cycles, and industrial tariffs. Confirm candidate motor frame mounting and torque curve before procurement."
+        )
         ws.merge_range(
             "B24:D26",
-            "Savings are realistic engineering estimates based on measured average load, IEC 60034-30-1 standard efficiency curves, observed duty cycles, and industrial tariffs. Confirm candidate motor frame mounting and torque curve before procurement.",
+            limitations_text,
             f_summary_text,
         )
-        ws.set_row(19, 30)
-        ws.set_row(20, 30)
-        ws.set_row(21, 30)
+        details_h = max(30.0, math.ceil(_estimate_wrapped_row_height(details, col_chars_width=86, line_height_pt=18.0, min_height_pt=90.0) / 3.0))
+        ws.set_row(19, details_h)
+        ws.set_row(20, details_h)
+        ws.set_row(21, details_h)
         ws.set_row(23, 30)
         ws.set_row(24, 30)
         ws.set_row(25, 30)
@@ -1019,10 +1132,11 @@ class ExcelReportService:
         self, ws, summary, points, alerts, auto_obs, profile,
         f_title, f_sec, f_hdr, f_cell, f_bold, f_num, f_pct
     ):
+        ws.set_default_row(24)
         ws.set_column("A:A", 5)
-        ws.set_column("B:B", 35)
-        ws.set_column("C:C", 20)
-        ws.set_column("D:D", 15)
+        ws.set_column("B:B", 40)
+        ws.set_column("C:C", 24)
+        ws.set_column("D:D", 18)
 
         ws.merge_range("B1:D1", "MOTOR ENERGY AUDIT - DETAILED ANALYSIS", f_title)
 
@@ -1333,10 +1447,46 @@ class ExcelReportService:
         if roi_params.get("after_kwh_hr_manual") is not None:
             after_kwh_hr = float(roi_params["after_kwh_hr_manual"])
 
-        # Before window: query DB for before period if specified, or manual
+        # Before window: query DB for selected PowerStudy, historical window, or manual override
         before_kwh_hr = None
+        before_study_code = None
+        before_study_customer = None
+        before_study_label = None
+
         if roi_params.get("before_kwh_hr_manual") is not None:
             before_kwh_hr = float(roi_params["before_kwh_hr_manual"])
+        elif roi_params.get("before_study_id") or roi_params.get("before_study_code"):
+            try:
+                b_study = None
+                if roi_params.get("before_study_id"):
+                    b_study = db.query(PowerStudy).filter(PowerStudy.id == int(roi_params["before_study_id"])).first()
+                elif roi_params.get("before_study_code"):
+                    b_study = db.query(PowerStudy).filter(PowerStudy.study_code == str(roi_params["before_study_code"]).strip()).first()
+
+                if b_study:
+                    before_study_code = b_study.study_code
+                    before_study_customer = (b_study.customer_name or "").strip()
+                    before_study_label = (
+                        f"{before_study_code} — {before_study_customer}"
+                        if before_study_customer
+                        else before_study_code
+                    )
+                    if b_study.kwh_per_running_hour is not None and b_study.kwh_per_running_hour > 0:
+                        before_kwh_hr = float(b_study.kwh_per_running_hour)
+                    else:
+                        b_start = b_study.started_at
+                        b_end = b_study.stopped_at or datetime.now(timezone.utc)
+                        b_summary = query_service.get_period_summary(b_study.device_id, b_start, b_end, db)
+                        b_kwh = b_summary.get("energy_kwh", 0.0)
+                        b_run_hrs = b_summary.get("running_hours", 0.0)
+                        if b_run_hrs > 0 and b_kwh > 0:
+                            before_kwh_hr = b_kwh / b_run_hrs
+                        elif b_summary.get("duration_hours", 0) > 0 and b_kwh > 0:
+                            before_kwh_hr = b_kwh / b_summary["duration_hours"]
+                        elif b_study.avg_kw is not None and b_study.avg_kw > 0:
+                            before_kwh_hr = float(b_study.avg_kw)
+            except Exception:
+                before_kwh_hr = None
         elif roi_params.get("before_start") and roi_params.get("before_end"):
             try:
                 b_start = datetime.fromisoformat(roi_params["before_start"])
@@ -1363,6 +1513,9 @@ class ExcelReportService:
         return {
             "before_kwh_hr": round(before_kwh_hr, 2) if before_kwh_hr is not None else None,
             "after_kwh_hr": round(after_kwh_hr, 2) if after_kwh_hr is not None and after_kwh_hr > 0 else None,
+            "before_study_code": before_study_code,
+            "before_study_customer": before_study_customer,
+            "before_study_label": before_study_label,
             "annual_operating_hours": float(configured_annual_hours) if configured_annual_hours is not None else None,
             "electricity_tariff": float(configured_tariff) if configured_tariff is not None else None,
             "motor_investment": float(configured_motor_cost) if configured_motor_cost is not None else None,

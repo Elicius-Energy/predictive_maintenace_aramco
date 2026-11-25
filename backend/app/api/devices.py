@@ -190,6 +190,9 @@ def get_device_profile(device_id: str, db: Session = Depends(get_db), user: User
     if not profile:
         raise HTTPException(status_code=404, detail="Device profile not found")
 
+    from app.services.excel_report_service import _find_motor_nameplate_photo
+    nameplate_path = _find_motor_nameplate_photo(device.device_id)
+
     return {
         "device_id": device.device_id,
         "alias": device.alias,
@@ -216,6 +219,8 @@ def get_device_profile(device_id: str, db: Session = Depends(get_db), user: User
         "insulation_class": profile.insulation_class,
         "motor_type": profile.motor_type,
         "serial_number": profile.serial_number,
+        "has_nameplate_image": nameplate_path is not None,
+        "nameplate_image_url": f"/api/devices/{device.device_id}/motor-nameplate-image" if nameplate_path is not None else None,
         "machine_name": profile.machine_name,
         "machine_make": profile.machine_make,
         "machine_model_no": profile.machine_model_no,
@@ -277,10 +282,11 @@ def update_device_profile(
         del update_data["alias"]
 
     for k, v in update_data.items():
-        setattr(profile, k, v)
+        if hasattr(profile, k):
+            setattr(profile, k, v)
 
-    if profile.rated_efficiency_pct is None or not (0 < profile.rated_efficiency_pct <= 100):
-        raise HTTPException(status_code=422, detail="Rated motor efficiency from the nameplate is required (greater than 0 and up to 100%).")
+    if profile.rated_efficiency_pct is not None and not (0 < profile.rated_efficiency_pct <= 100):
+        raise HTTPException(status_code=422, detail="Rated motor efficiency from the nameplate must be greater than 0 and up to 100%.")
     replacement_efficiency = profile.replacement_motor_efficiency_pct
     if replacement_efficiency is not None and not (0 < replacement_efficiency <= 100):
         raise HTTPException(status_code=422, detail="Replacement motor efficiency must be greater than 0 and up to 100%.")
@@ -1218,8 +1224,127 @@ def upload_motor_nameplate(
         "matched_timestamp_ist": ist_str,
         "extracted": nameplate_record,
         "profile_updated": updated_profile_fields,
+        "has_nameplate_image": True,
+        "nameplate_image_url": f"/api/devices/{device_id}/motor-nameplate-image",
         "message": msg
     }
+
+
+@router.get("/{device_id}/motor-nameplate-image")
+def get_motor_nameplate_image(
+    device_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Serve the stored motor nameplate photograph for preview in Configuration."""
+    from fastapi.responses import FileResponse
+    from app.services.excel_report_service import _find_motor_nameplate_photo
+
+    require_device_access(user, device_id, db)
+    nameplate_path = _find_motor_nameplate_photo(device_id)
+    if nameplate_path is None or not nameplate_path.is_file():
+        raise HTTPException(status_code=404, detail="Motor nameplate image not found")
+
+    ext = nameplate_path.suffix.lower()
+    media_type = "image/png" if ext == ".png" else "image/jpeg"
+    return FileResponse(
+        path=str(nameplate_path),
+        media_type=media_type,
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
+
+
+@router.delete("/{device_id}/motor-nameplate")
+def delete_motor_nameplate(
+    device_id: str,
+    clear_ocr_details: bool = Query(True),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Delete the stored motor nameplate image file for a device and clear stale
+    nameplate OCR details from the device profile and readings so previous study
+    nameplate details are never carried over when a nameplate is unavailable.
+    """
+    import re
+    from pathlib import Path
+    from sqlalchemy import cast, String
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.config import settings
+
+    require_device_access(user, device_id, db)
+    device = db.query(Device).filter(Device.device_id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]", "_", device_id)
+    nameplates_dir = Path(settings.REPORTS_DIR).parent / "nameplates"
+    removed_files = 0
+    for ext in (".jpg", ".jpeg", ".png"):
+        candidate = nameplates_dir / f"{safe_id}{ext}"
+        if candidate.exists():
+            try:
+                candidate.unlink()
+                removed_files += 1
+            except OSError:
+                pass
+
+    cleared_fields: Dict[str, Any] = {}
+    if clear_ocr_details and device.profile:
+        prof = device.profile
+        str_fields = [
+            "motor_make",
+            "frame_size",
+            "motor_connection",
+            "motor_duty",
+            "insulation_class",
+            "motor_type",
+            "serial_number",
+        ]
+        num_fields = [
+            "motor_rating_kw",
+            "rated_current_amps",
+            "rated_speed_rpm",
+            "rated_voltage",
+            "rated_efficiency_pct",
+        ]
+        for sf in str_fields:
+            setattr(prof, sf, "")
+            cleared_fields[sf] = ""
+        for nf in num_fields:
+            setattr(prof, nf, None)
+            cleared_fields[nf] = None
+        prof.updated_at = datetime.now(timezone.utc)
+
+    # Also strip any cached motor_nameplate dictionary from Reading.raw rows for this device
+    rows_with_np = (
+        db.query(Reading)
+        .filter(
+            Reading.device_id == device_id,
+            Reading.raw.isnot(None),
+            cast(Reading.raw, String).like('%"motor_nameplate"%'),
+        )
+        .all()
+    )
+    for r in rows_with_np:
+        if isinstance(r.raw, dict) and "motor_nameplate" in r.raw:
+            raw_copy = dict(r.raw)
+            del raw_copy["motor_nameplate"]
+            r.raw = raw_copy
+            flag_modified(r, "raw")
+
+    db.commit()
+
+    return {
+        "success": True,
+        "device_id": device_id,
+        "removed_files": removed_files,
+        "cleared_fields": cleared_fields,
+        "has_nameplate_image": False,
+        "nameplate_image_url": None,
+        "message": "Motor nameplate image deleted and previous study nameplate OCR details cleared.",
+    }
+
 
 
 

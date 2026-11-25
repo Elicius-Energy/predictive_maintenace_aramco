@@ -17,7 +17,8 @@ import {
   getConfigDraft,
   saveConfigDraft,
   clearConfigDraft,
-  saveLatestNameplate
+  saveLatestNameplate,
+  clearLatestNameplate
 } from '../utils/sessionPersistence';
 
 export const Configuration: React.FC = () => {
@@ -40,6 +41,8 @@ export const Configuration: React.FC = () => {
   const nameplateCameraTriggerRef = useRef<(() => void) | null>(null);
   const [uploadingScreen, setUploadingScreen] = useState(false);
   const [uploadingNameplate, setUploadingNameplate] = useState(false);
+  const [deletingNameplate, setDeletingNameplate] = useState(false);
+  const [nameplateCacheBust, setNameplateCacheBust] = useState<number>(() => Date.now());
   const [ocrModal, setOcrModal] = useState<{
     kind: 'screen' | 'nameplate';
     res: MachineScreenOcrResponse | MotorNameplateOcrResponse;
@@ -94,10 +97,13 @@ export const Configuration: React.FC = () => {
     try {
       const res = await uploadMotorNameplateImage(selectedDeviceId, file);
       if (res.success && res.profile_updated) {
+        const nameplateUrl = (res as any).nameplate_image_url || `/api/devices/${selectedDeviceId}/motor-nameplate-image`;
         setProfile((prev: any) => {
           const updated = {
             ...(prev || {}),
             ...res.profile_updated,
+            has_nameplate_image: true,
+            nameplate_image_url: nameplateUrl,
           };
           if (hasUnsavedChanges) {
             saveConfigDraft(selectedDeviceId, updated);
@@ -105,8 +111,14 @@ export const Configuration: React.FC = () => {
           return updated;
         });
         if (savedProfileRef.current) {
-          savedProfileRef.current = { ...savedProfileRef.current, ...res.profile_updated };
+          savedProfileRef.current = {
+            ...savedProfileRef.current,
+            ...res.profile_updated,
+            has_nameplate_image: true,
+            nameplate_image_url: nameplateUrl,
+          };
         }
+        setNameplateCacheBust(Date.now());
         saveLatestNameplate(selectedDeviceId, res.extracted);
         setBaselineSuccess(res.message || 'Motor nameplate details populated from photo.');
       }
@@ -117,6 +129,60 @@ export const Configuration: React.FC = () => {
       setErrorMessage(err.response?.data?.detail || err.message || 'Failed to read motor nameplate photo.');
     } finally {
       setUploadingNameplate(false);
+    }
+  };
+
+  const handleDeleteNameplate = async () => {
+    if (!selectedDeviceId || deletingNameplate) return;
+    setDeletingNameplate(true);
+    setBaselineSuccess(null);
+    setErrorMessage(null);
+    try {
+      const res = await axios.delete(`/api/devices/${selectedDeviceId}/motor-nameplate`, {
+        withCredentials: true,
+      });
+      const clearedFields = res.data?.cleared_fields || {
+        motor_make: '',
+        motor_rating_kw: null,
+        frame_size: '',
+        rated_current_amps: null,
+        rated_speed_rpm: null,
+        rated_voltage: null,
+        rated_efficiency_pct: null,
+        motor_connection: '',
+        motor_duty: '',
+        insulation_class: '',
+        motor_type: '',
+        serial_number: '',
+      };
+      setProfile((prev: any) => {
+        const updated = {
+          ...(prev || {}),
+          ...clearedFields,
+          has_nameplate_image: false,
+          nameplate_image_url: null,
+        };
+        if (hasUnsavedChanges) {
+          saveConfigDraft(selectedDeviceId, updated);
+        }
+        return updated;
+      });
+      if (savedProfileRef.current) {
+        savedProfileRef.current = {
+          ...savedProfileRef.current,
+          ...clearedFields,
+          has_nameplate_image: false,
+          nameplate_image_url: null,
+        };
+      }
+      clearLatestNameplate(selectedDeviceId);
+      setBaselineSuccess(
+        res.data?.message || 'Motor nameplate image deleted and previous study nameplate OCR details cleared.'
+      );
+    } catch (err: any) {
+      setErrorMessage(err.response?.data?.detail || 'Failed to delete motor nameplate image.');
+    } finally {
+      setDeletingNameplate(false);
     }
   };
 
@@ -207,8 +273,12 @@ export const Configuration: React.FC = () => {
   const handleSave = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!selectedDeviceId || !profile) return;
-    if (!profile.rated_efficiency_pct || profile.rated_efficiency_pct <= 0 || profile.rated_efficiency_pct > 100) {
-      setErrorMessage('Rated motor efficiency from the nameplate is required (greater than 0 and up to 100%).');
+    if (
+      profile.rated_efficiency_pct != null &&
+      profile.rated_efficiency_pct !== '' &&
+      (profile.rated_efficiency_pct <= 0 || profile.rated_efficiency_pct > 100)
+    ) {
+      setErrorMessage('Rated motor efficiency from the nameplate must be greater than 0 and up to 100%.');
       setOpenSections((prev) => ({ ...prev, motor: true }));
       return;
     }
@@ -590,17 +660,59 @@ export const Configuration: React.FC = () => {
                     Upload or take a photo of the motor nameplate to automatically extract Make, kW, Frame, Amps, RPM, Voltage, Efficiency, Connection, and Duty.
                   </div>
                 </div>
-                <PhotoCaptureControls
-                  label="Motor Nameplate"
-                  loading={uploadingNameplate}
-                  loadingLabel="Extracting via OCR..."
-                  variant="teal"
-                  onFileSelected={handleNameplateFileSelected}
-                  uploadTriggerRef={nameplateUploadTriggerRef}
-                  cameraTriggerRef={nameplateCameraTriggerRef}
-                  title="Upload or capture a motor nameplate photo to auto-fill motor specifications"
-                />
+                <div className="flex items-center gap-2 flex-wrap">
+                  <PhotoCaptureControls
+                    label="Motor Nameplate"
+                    loading={uploadingNameplate}
+                    loadingLabel="Extracting via OCR..."
+                    variant="teal"
+                    onFileSelected={handleNameplateFileSelected}
+                    uploadTriggerRef={nameplateUploadTriggerRef}
+                    cameraTriggerRef={nameplateCameraTriggerRef}
+                    title="Upload or capture a motor nameplate photo to auto-fill motor specifications"
+                  />
+                  {(profile?.has_nameplate_image ||
+                    profile?.motor_make ||
+                    profile?.motor_rating_kw != null ||
+                    profile?.rated_efficiency_pct != null ||
+                    profile?.serial_number) && (
+                    <button
+                      type="button"
+                      onClick={handleDeleteNameplate}
+                      disabled={deletingNameplate}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-xs transition-colors cursor-pointer"
+                      title="Delete stored motor nameplate image and clear previous study OCR nameplate details"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>{deletingNameplate ? 'Deleting...' : 'Delete Nameplate'}</span>
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {/* Stored Motor Nameplate Image Preview Card */}
+              {profile?.has_nameplate_image && (
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-28 h-20 rounded-lg border border-slate-300 bg-white overflow-hidden shrink-0 flex items-center justify-center shadow-2xs">
+                      <img
+                        src={`${profile.nameplate_image_url || `/api/devices/${selectedDeviceId}/motor-nameplate-image`}?t=${nameplateCacheBust}`}
+                        alt="Motor Nameplate Preview"
+                        className="w-full h-full object-contain"
+                      />
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-800 text-xs">Stored Motor Nameplate Image</div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        This nameplate photo and its OCR specifications are currently attached to <span className="font-semibold text-slate-700">{profile?.alias || selectedDeviceId}</span> and will be embedded in Excel reports.
+                      </p>
+                      <p className="text-[11px] text-amber-700 font-medium mt-1">
+                        Starting a new study where the nameplate is unavailable? Click "Delete Nameplate" to remove this old file and clear previous OCR details.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
@@ -613,13 +725,12 @@ export const Configuration: React.FC = () => {
                 />
               </div>
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Motor Rating (kW) *</label>
+                <label className="block font-semibold text-slate-700 mb-1">Motor Rating (kW)</label>
                 <input
                   type="number"
                   step="any"
-                  required
                   value={profile?.motor_rating_kw ?? ''}
-                  onChange={(e) => handleInputChange('motor_rating_kw', parseFloat(e.target.value))}
+                  onChange={(e) => handleInputChange('motor_rating_kw', e.target.value === '' ? null : parseFloat(e.target.value))}
                   className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
                 />
               </div>
@@ -638,7 +749,7 @@ export const Configuration: React.FC = () => {
                   type="number"
                   step="any"
                   value={profile?.rated_current_amps ?? ''}
-                  onChange={(e) => handleInputChange('rated_current_amps', parseFloat(e.target.value))}
+                  onChange={(e) => handleInputChange('rated_current_amps', e.target.value === '' ? null : parseFloat(e.target.value))}
                   className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
                 />
               </div>
@@ -648,7 +759,7 @@ export const Configuration: React.FC = () => {
                   type="number"
                   step="any"
                   value={profile?.rated_speed_rpm ?? ''}
-                  onChange={(e) => handleInputChange('rated_speed_rpm', parseFloat(e.target.value))}
+                  onChange={(e) => handleInputChange('rated_speed_rpm', e.target.value === '' ? null : parseFloat(e.target.value))}
                   className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
                 />
               </div>
@@ -658,23 +769,22 @@ export const Configuration: React.FC = () => {
                   type="number"
                   step="any"
                   value={profile?.rated_voltage ?? ''}
-                  onChange={(e) => handleInputChange('rated_voltage', parseFloat(e.target.value))}
+                  onChange={(e) => handleInputChange('rated_voltage', e.target.value === '' ? null : parseFloat(e.target.value))}
                   className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
                 />
               </div>
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Rated Efficiency (%) *</label>
+                <label className="block font-semibold text-slate-700 mb-1">Rated Efficiency (%)</label>
                 <input
                   type="number"
                   step="0.01"
                   min="0.01"
                   max="100"
-                  required
                   value={profile?.rated_efficiency_pct ?? ''}
                   onChange={(e) => handleInputChange('rated_efficiency_pct', e.target.value === '' ? null : parseFloat(e.target.value))}
                   className="w-full border border-slate-300 rounded-lg p-2.5 focus:border-[#1F3A8A] focus:outline-hidden"
                 />
-                <p className="text-[11px] text-slate-500 mt-1">Enter the efficiency (%) printed on the current motor nameplate.</p>
+                <p className="text-[11px] text-slate-500 mt-1">Enter the efficiency (%) printed on the current motor nameplate (leave blank if unavailable).</p>
               </div>
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Connection</label>

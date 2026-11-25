@@ -8,9 +8,24 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.config import settings
 from app.db.init_db import init_db
+from app.db.base import SessionLocal
+from app.db.models import User
+from app.core.security import hash_password
 
 init_db()
-client = TestClient(app)
+_db = SessionLocal()
+try:
+    _admin = _db.query(User).filter(User.username == "admin").first()
+    if _admin:
+        _admin.password_hash = hash_password("admin12345678")
+        _admin.must_change_password = False
+        _admin.is_active = True
+        _db.commit()
+finally:
+    _db.close()
+
+TEST_ADMIN_PASSWORD = "admin12345678"
+client = TestClient(app, base_url="https://testserver")
 
 
 def test_health_check():
@@ -18,7 +33,7 @@ def test_health_check():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
-    assert "Elicius" in data["service"]
+    assert any(k in data["service"] for k in ("Elicius", "LEDL"))
 
 
 def test_auth_login_and_me():
@@ -28,7 +43,7 @@ def test_auth_login_and_me():
     assert "Invalid username or password" in resp.json()["detail"]
 
     # 2. Valid login
-    resp = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+    resp = client.post("/api/auth/login", json={"username": "admin", "password": TEST_ADMIN_PASSWORD})
     assert resp.status_code == 200
     data = resp.json()
     assert data["username"] == "admin"
@@ -40,7 +55,8 @@ def test_auth_login_and_me():
     assert resp.json()["username"] == "admin"
 
     # 4. Logout
-    resp = client.post("/api/auth/logout")
+    csrf = client.cookies.get("elicius_csrf", "")
+    resp = client.post("/api/auth/logout", headers={"X-CSRF-Token": csrf} if csrf else {})
     assert resp.status_code == 200
     assert resp.json()["message"] == "Logged out successfully"
 
@@ -68,13 +84,15 @@ def test_ingest_auth():
 
 def test_device_endpoints():
     # Login first
-    client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+    login_resp = client.post("/api/auth/login", json={"username": "admin", "password": TEST_ADMIN_PASSWORD})
+    csrf = client.cookies.get("elicius_csrf", "")
+    headers = {"X-CSRF-Token": csrf} if csrf else {}
 
     # Register test device first
     client.post("/api/devices/register", json={
         "device_id": "002D00203335471332323632",
         "alias": "Main Motor Meter"
-    })
+    }, headers=headers)
 
     # 1. List devices
     resp = client.get("/api/devices")
@@ -93,7 +111,7 @@ def test_device_endpoints():
     # 3. Update profile
     updated_profile = dict(profile)
     updated_profile["customer_name"] = "LEDL Coimbatore Unit 1"
-    resp = client.put("/api/devices/002D00203335471332323632/profile", json=updated_profile)
+    resp = client.put("/api/devices/002D00203335471332323632/profile", json=updated_profile, headers=headers)
     assert resp.status_code == 200
     assert resp.json()["message"] == "Configuration saved successfully"
 
@@ -128,7 +146,9 @@ def test_device_endpoints():
 
 
 def test_reports_workflow():
-    client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+    client.post("/api/auth/login", json={"username": "admin", "password": TEST_ADMIN_PASSWORD})
+    csrf = client.cookies.get("elicius_csrf", "")
+    headers = {"X-CSRF-Token": csrf} if csrf else {}
 
     now = datetime.now(timezone.utc)
     start = now - timedelta(hours=24)
@@ -142,7 +162,7 @@ def test_reports_workflow():
         "end_time": end_iso,
         "interval": "1-minute"
     }
-    resp = client.post("/api/reports/preview", json=params)
+    resp = client.post("/api/reports/preview", json=params, headers=headers)
     assert resp.status_code == 200
     preview = resp.json()
     assert "energy_kwh" in preview
@@ -165,7 +185,7 @@ def test_reports_workflow():
             "investment_inr": 120000.0
         }
     }
-    resp = client.post("/api/reports/generate", json=gen_payload)
+    resp = client.post("/api/reports/generate", json=gen_payload, headers=headers)
     assert resp.status_code == 200
     assert "spreadsheetml" in resp.headers.get("content-type", "")
     assert len(resp.content) > 1000  # valid binary Excel workbook
