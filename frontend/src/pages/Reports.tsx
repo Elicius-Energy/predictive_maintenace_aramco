@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useDevice } from '../contexts/DeviceContext';
+import { useAuth } from '../contexts/AuthContext';
 import {
   FileSpreadsheet, Download, RefreshCw, AlertCircle, Eye, Trash2, Timer
 } from 'lucide-react';
 import { TimeInputWithAmPm } from '../components/common/TimeInputWithAmPm';
+import { PowerStudyDropdown, type PowerStudyOption } from '../components/common/PowerStudyDropdown';
 import {
   getPowerStudy,
+  resetPowerStudy,
   getReportDraft,
   saveReportDraft,
   type PowerStudySession
@@ -14,6 +17,8 @@ import {
 
 export const Reports: React.FC = () => {
   const { devices, selectedDevice, selectedDeviceId } = useDevice();
+  const { user } = useAuth();
+  const isAdmin = user?.role?.toLowerCase() === 'admin';
 
   const getIstDateAndTime = (d: Date) => {
     const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -409,6 +414,40 @@ export const Reports: React.FC = () => {
     return csrf ? { 'X-CSRF-Token': decodeURIComponent(csrf) } : {};
   };
 
+  const handleDeletePowerStudy = async (study: PowerStudyOption) => {
+    const label = `${study.study_code}${study.customer_name ? ` — ${study.customer_name}` : ''}`;
+    if (
+      typeof window !== 'undefined' &&
+      window.confirm &&
+      !window.confirm(`Delete power study "${label}"? Its duration and name will be safely archived in the backend recovery database.`)
+    ) {
+      return;
+    }
+    setErrorMsg(null);
+    try {
+      await axios.delete(`/api/studies/${study.id}`, {
+        withCredentials: true,
+        headers: getCsrfHeader(),
+      });
+      setRecordedStudies((prev) => prev.filter((s) => s.id !== study.id));
+      if (beforeStudyId === String(study.id)) {
+        setBeforeStudyId('');
+        setManualBeforeKwhHr('');
+      }
+      if (selectedStudyId === String(study.id)) {
+        setSelectedStudyId('');
+      }
+      if (activeStudy?.id === study.id) {
+        setActiveStudy(null);
+        if (selectedDeviceId) {
+          resetPowerStudy(selectedDeviceId);
+        }
+      }
+    } catch (err: any) {
+      setErrorMsg(err.response?.data?.detail || 'Failed to delete power study.');
+    }
+  };
+
   const handleDeleteReport = async (reportId: number, reportNo: string) => {
     if (!window.confirm(`Delete report "${reportNo}" from the server? This will permanently remove the file.`)) {
       return;
@@ -616,35 +655,34 @@ export const Reports: React.FC = () => {
               </button>
             )}
             {recordedStudies.length > 0 && (
-              <select
-                aria-label="Select Recorded Power Study Window"
-                value={selectedStudyId}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSelectedStudyId(val);
-                  const found = recordedStudies.find((s) => String(s.id) === val);
-                  if (found) {
-                    applyStudyWindow({
-                      id: found.id,
-                      studyCode: found.study_code,
-                      customerName: found.customer_name || '',
-                      displayLabel: found.display_label,
-                      status: found.status === 'running' ? 'running' : 'completed',
-                      startedAt: found.started_at,
-                      stoppedAt: found.stopped_at || null,
-                      updatedAt: found.updated_at || found.stopped_at || found.started_at,
-                    });
-                  }
-                }}
-                className="bg-emerald-50/70 border border-emerald-200 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-900 focus:border-[#1F3A8A] focus:outline-hidden cursor-pointer"
-              >
-                <option value="">Choose Recorded Study (Code & Customer)...</option>
-                {recordedStudies.map((s) => (
-                  <option key={s.id} value={String(s.id)}>
-                    {s.study_code} — {s.customer_name || 'No Customer'} ({s.status === 'running' ? 'Running' : s.duration_str || 'Completed'})
-                  </option>
-                ))}
-              </select>
+              <div className="min-w-[260px]">
+                <PowerStudyDropdown
+                  ariaLabel="Select Recorded Power Study Window"
+                  studies={recordedStudies}
+                  value={selectedStudyId}
+                  placeholder="Choose Recorded Study (Code & Customer)..."
+                  canDelete={isAdmin}
+                  onDelete={handleDeletePowerStudy}
+                  formatMeta={(s) => (s.status === 'running' ? 'Running' : s.duration_str || 'Completed')}
+                  buttonClassName="w-full bg-emerald-50/70 border border-emerald-200 rounded-lg px-2.5 py-1.5 font-semibold text-emerald-900"
+                  onChange={(val) => {
+                    setSelectedStudyId(val);
+                    const found = recordedStudies.find((s) => String(s.id) === val);
+                    if (found) {
+                      applyStudyWindow({
+                        id: found.id,
+                        studyCode: found.study_code,
+                        customerName: found.customer_name || '',
+                        displayLabel: found.display_label,
+                        status: found.status === 'running' ? 'running' : 'completed',
+                        startedAt: found.started_at,
+                        stoppedAt: found.stopped_at || null,
+                        updatedAt: found.updated_at || found.stopped_at || found.started_at,
+                      });
+                    }
+                  }}
+                />
+              </div>
             )}
             {(['1h', '8h', '24h', '7d'] as const).map((p) => (
               <button
@@ -819,11 +857,22 @@ export const Reports: React.FC = () => {
                   <label htmlFor="before-power-study-select" className="block font-semibold text-slate-600 mb-1">
                     Before Power Study (Code & Customer Name)
                   </label>
-                  <select
+                  <PowerStudyDropdown
                     id="before-power-study-select"
+                    ariaLabel="Before Power Study (Code & Customer Name)"
+                    studies={recordedStudies}
                     value={beforeStudyId}
-                    onChange={(e) => {
-                      const val = e.target.value;
+                    placeholder="-- Select Power Study for Before kWh/hr --"
+                    canDelete={isAdmin}
+                    onDelete={handleDeletePowerStudy}
+                    formatMeta={(s) =>
+                      s.kwh_per_running_hour != null
+                        ? `${Number(s.kwh_per_running_hour).toFixed(2)} kWh/hr`
+                        : s.status === 'running'
+                        ? 'Running'
+                        : s.duration_str || ''
+                    }
+                    onChange={(val) => {
                       setBeforeStudyId(val);
                       const chosen = recordedStudies.find((s) => String(s.id) === val);
                       if (chosen && chosen.kwh_per_running_hour != null) {
@@ -832,16 +881,7 @@ export const Reports: React.FC = () => {
                         setManualBeforeKwhHr('');
                       }
                     }}
-                    className="w-full bg-white border border-slate-300 rounded-lg p-2 font-medium text-slate-800 cursor-pointer focus:border-[#1F3A8A] focus:outline-hidden"
-                  >
-                    <option value="">-- Select Power Study for Before kWh/hr --</option>
-                    {recordedStudies.map((s) => (
-                      <option key={s.id} value={String(s.id)}>
-                        {s.study_code} — {s.customer_name || 'No Customer'}
-                        {s.kwh_per_running_hour != null ? ` (${Number(s.kwh_per_running_hour).toFixed(2)} kWh/hr)` : ''}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 <div>
                   <label className="block font-semibold text-slate-600 mb-1">Before kWh/hr (Manual Override)</label>

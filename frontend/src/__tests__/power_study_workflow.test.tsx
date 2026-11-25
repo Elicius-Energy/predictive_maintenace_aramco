@@ -59,7 +59,7 @@ describe('Power Study Workflow, Before Study Dropdown & Nameplate Lifecycle', ()
     localStorage.clear();
   });
 
-  it('Dashboard shows running study synced from server with LEDL code, customer name input, and admin delete option', async () => {
+  it('Dashboard shows running study synced from server with LEDL code and customer name input without a delete button', async () => {
     mockedAxios.get.mockImplementation(async (url: string) => {
       if (url.includes('/studies/active')) {
         return {
@@ -109,10 +109,12 @@ describe('Power Study Workflow, Before Study Dropdown & Nameplate Lifecycle', ()
     expect(customerInput).toBeInTheDocument();
     expect(customerInput.value).toBe('Aramco Spinning Unit');
     expect(screen.getByRole('button', { name: /Stop Study/i })).toBeInTheDocument();
-    expect(screen.getByTitle(/Delete study/i)).toBeInTheDocument();
+    // Delete button must NOT be near Start/Stop Study on Dashboard
+    expect(screen.queryByTitle(/Delete study/i)).not.toBeInTheDocument();
   });
 
-  it('Reports replaces Before Window date pickers with Before Power Study dropdown showing LEDL code and customer name', async () => {
+  it('Reports Before Power Study dropdown shows LEDL code & customer name with admin delete button next to each study', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     mockedAxios.get.mockImplementation(async (url: string) => {
       if (url.startsWith('/api/studies')) {
         return {
@@ -160,6 +162,7 @@ describe('Power Study Workflow, Before Study Dropdown & Nameplate Lifecycle', ()
       return { data: {} } as any;
     });
     mockedAxios.post.mockResolvedValue({ data: { energy_kwh: 24.0, avg_kw: 12.0, avg_pf: 0.9, idle_time_str: '0h', data_completeness_pct: 100 } } as any);
+    mockedAxios.delete.mockResolvedValue({ data: { success: true, deleted_id: 1, study_code: 'LEDL0001', archived: true } } as any);
 
     render(
       <BrowserRouter>
@@ -171,18 +174,31 @@ describe('Power Study Workflow, Before Study Dropdown & Nameplate Lifecycle', ()
       </BrowserRouter>
     );
 
-    await waitFor(() => {
-      expect(screen.getByLabelText(/Before Power Study/i)).toBeInTheDocument();
-    });
+    const beforeDropdownBtn = await screen.findByLabelText(/Before Power Study/i);
+    expect(beforeDropdownBtn).toBeInTheDocument();
 
     // Old date window labels should no longer exist
     expect(screen.queryByText('Before Window Start')).not.toBeInTheDocument();
     expect(screen.queryByText('Before Window End')).not.toBeInTheDocument();
 
-    // Dropdown should show LEDL0001 and customer name
-    const beforeSelect = screen.getByLabelText(/Before Power Study/i) as HTMLSelectElement;
-    expect(beforeSelect.innerHTML).toContain('LEDL0001');
-    expect(beforeSelect.innerHTML).toContain('Lakshmi Textile Unit 1');
+    // Open dropdown and verify studies + per-study delete buttons appear
+    fireEvent.click(beforeDropdownBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/LEDL0001 — Lakshmi Textile Unit 1/i)).toBeInTheDocument();
+      expect(screen.getByText(/LEDL0002 — PSG Mills/i)).toBeInTheDocument();
+    });
+
+    const deleteLedl1Btn = screen.getByRole('button', { name: /Delete study LEDL0001/i });
+    expect(deleteLedl1Btn).toBeInTheDocument();
+
+    // Delete LEDL0001 from inside the dropdown
+    fireEvent.click(deleteLedl1Btn);
+
+    await waitFor(() => {
+      expect(mockedAxios.delete).toHaveBeenCalledWith('/api/studies/1', expect.anything());
+      expect(screen.queryByText(/LEDL0001 — Lakshmi Textile Unit 1/i)).not.toBeInTheDocument();
+    });
   });
 
   it('Configuration shows motor nameplate image preview and Delete Nameplate button that clears image and OCR details', async () => {
@@ -405,8 +421,10 @@ describe('Power Study Workflow, Before Study Dropdown & Nameplate Lifecycle', ()
       </BrowserRouter>
     );
 
-    const beforeSelect = (await screen.findByLabelText(/Before Power Study/i)) as HTMLSelectElement;
-    fireEvent.change(beforeSelect, { target: { value: '7' } });
-    expect(beforeSelect.value).toBe('7');
+    const beforeBtn = await screen.findByLabelText(/Before Power Study/i);
+    fireEvent.click(beforeBtn);
+    const optionLedl7 = await screen.findByText(/LEDL0007 — KPR Mill Unit 2/i);
+    fireEvent.click(optionLedl7);
+    expect(beforeBtn.textContent).toContain('LEDL0007');
   });
 });

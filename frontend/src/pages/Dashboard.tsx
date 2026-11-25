@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useDevice } from '../contexts/DeviceContext';
-import { useAuth } from '../contexts/AuthContext';
 import {
   Activity, Zap, Gauge, Flame, Clock, RefreshCw, AlertTriangle,
   CheckCircle2, WifiOff, AlertCircle, Loader2, Thermometer, RotateCw, Check, Camera,
-  Upload, Play, Square, Timer, Trash2, Building
+  Upload, Play, Square, Timer, Building
 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
@@ -28,7 +27,6 @@ import {
   savePowerStudy,
   startPowerStudy,
   stopPowerStudy,
-  resetPowerStudy,
   mergeConfigDraft,
   getLatestNameplate,
   saveLatestNameplate,
@@ -38,8 +36,6 @@ import {
 
 export const Dashboard: React.FC = () => {
   const { devices, selectedDevice, selectedDeviceId, getStatusColor } = useDevice();
-  const { user } = useAuth();
-  const isAdmin = user?.role?.toLowerCase() === 'admin';
   
   // Live cards data
   const [liveData, setLiveData] = useState<any>(null);
@@ -496,34 +492,6 @@ export const Dashboard: React.FC = () => {
       } else {
         setManualErrorMsg(err.response?.data?.detail || 'Failed to stop power study.');
       }
-    } finally {
-      setStudyActionLoading(false);
-    }
-  };
-
-  const handleDeleteStudy = async () => {
-    if (!selectedDeviceId || !studySession) return;
-    if (!studySession.id) {
-      resetPowerStudy(selectedDeviceId);
-      setStudySession(null);
-      setStudyElapsedSec(0);
-      return;
-    }
-    const label = studySession.displayLabel || studySession.studyCode || 'this study';
-    if (typeof window !== 'undefined' && window.confirm && !window.confirm(`Delete power study "${label}"? Its duration and name will be safely archived in the backend recovery database.`)) {
-      return;
-    }
-    setStudyActionLoading(true);
-    setManualErrorMsg(null);
-    try {
-      await axios.delete(`/api/studies/${studySession.id}`, { withCredentials: true });
-      resetPowerStudy(selectedDeviceId);
-      setStudySession(null);
-      setStudyElapsedSec(0);
-      setManualSuccessMsg(`Power study ${studySession.studyCode || ''} deleted from active list and archived in the backend recovery database.`);
-      await syncActiveStudyFromServer(selectedDeviceId, true);
-    } catch (err: any) {
-      setManualErrorMsg(err.response?.data?.detail || 'Failed to delete power study.');
     } finally {
       setStudyActionLoading(false);
     }
@@ -1314,17 +1282,6 @@ export const Dashboard: React.FC = () => {
                     >
                       <Play className="w-3.5 h-3.5 fill-current" />
                       <span>{studySession?.status === 'completed' ? 'New Study' : 'Start Study'}</span>
-                    </button>
-                  )}
-                  {isAdmin && studySession && (
-                    <button
-                      type="button"
-                      onClick={handleDeleteStudy}
-                      disabled={studyActionLoading}
-                      title="Delete study (archived in backend recovery DB)"
-                      className="p-1.5 rounded-lg border border-rose-200 bg-white text-rose-600 hover:text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>
